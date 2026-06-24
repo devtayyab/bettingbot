@@ -1,0 +1,139 @@
+"""Thin persistence layer between domain objects and the ORM."""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..core.models import MarketSnapshot, ValueSignal
+from .models import Bet, OddsSnapshot, Signal
+
+# Statuses for which a signal is considered "still live" and must not be re-created.
+OPEN_STATUSES = ("detected", "approved")
+
+
+def save_snapshots(session: Session, snapshots: list[MarketSnapshot]) -> int:
+    """Persist every quote in every snapshot to the time-series table."""
+    rows = 0
+    for snap in snapshots:
+        for q in snap.quotes:
+            session.add(
+                OddsSnapshot(
+                    captured_at=q.captured_at,
+                    event_id=_safe_event_id(snap.event_id),
+                    market_type=snap.market_type,
+                    source=q.source,
+                    selection=q.selection,
+                    decimal_odds=q.decimal_odds,
+                    liquidity=q.liquidity,
+                )
+            )
+            rows += 1
+    return rows
+
+
+def has_open_signal(session: Session, event_id: int, market_type: str, selection: str) -> bool:
+    """True if a still-live signal already exists for this event/market/selection,
+    so repeated polls don't create duplicate rows for the same opportunity."""
+    stmt = (
+        select(Signal.id)
+        .where(
+            Signal.event_id == event_id,
+            Signal.market_type == market_type,
+            Signal.selection == selection,
+            Signal.status.in_(OPEN_STATUSES),
+        )
+        .limit(1)
+    )
+    return session.scalar(stmt) is not None
+
+
+def save_signal(session: Session, sig: ValueSignal) -> Signal | None:
+    """Persist a signal, or return None if an equivalent open signal already exists."""
+    event_id = _safe_event_id(sig.event_id)
+    if has_open_signal(session, event_id, sig.market_type, sig.selection):
+        return None
+    row = Signal(
+        event_id=event_id,
+        market_type=sig.market_type,
+        selection=sig.selection,
+        sport=sig.sport.value,
+        fair_prob=sig.fair_prob,
+        confirm_prob=sig.confirm_prob,
+        target_odds=sig.target_odds,
+        edge=sig.edge,
+        recommended_stake=sig.recommended_stake,
+        status="detected",
+        detected_at=sig.detected_at,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def open_signals(session: Session, status: str | None = None) -> list[Signal]:
+    stmt = select(Signal).order_by(Signal.edge.desc())
+    if status:
+        stmt = stmt.where(Signal.status == status)
+    return list(session.scalars(stmt))
+
+
+def record_bet(
+    session: Session,
+    signal: Signal,
+    placed_odds: float,
+    stake: float,
+    dry_run: bool,
+    note: str | None = None,
+) -> Bet:
+    bet = Bet(
+        signal_id=signal.id,
+        selection=signal.selection,
+        placed_odds=placed_odds,
+        stake=stake,
+        outcome="pending",
+        dry_run=dry_run,
+        note=note,
+        placed_at=datetime.now(timezone.utc),
+    )
+    signal.status = "placed"
+    session.add(bet)
+    session.flush()
+    return bet
+
+
+def pnl_summary(session: Session) -> dict:
+    """Realised P&L over settled bets, plus open exposure."""
+    bets = list(session.scalars(select(Bet)))
+    settled = [b for b in bets if b.outcome in {"won", "lost", "void"} and b.profit is not None]
+    realised = sum(b.profit for b in settled)
+    staked = sum(b.stake for b in settled)
+    open_exposure = sum(b.stake for b in bets if b.outcome == "pending")
+    roi = (realised / staked) if staked else 0.0
+    return {
+        "bets_total": len(bets),
+        "bets_settled": len(settled),
+        "realised_pnl": round(realised, 2),
+        "total_staked_settled": round(staked, 2),
+        "roi": round(roi, 4),
+        "open_exposure": round(open_exposure, 2),
+    }
+
+
+def _safe_event_id(raw: str | int) -> int:
+    """Source event ids are strings; map them to a stable int for storage.
+
+    For real Betfair ids ("1.234567") we strip non-digits; ids without digits hash
+    deterministically via SHA-256 (NOT builtin hash(), which is salted per-process
+    and would assign the same event different ids across runs, breaking joins/dedup).
+    """
+    if isinstance(raw, int):
+        return raw
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if digits:
+        return int(digits[:18])
+    h = hashlib.sha256(str(raw).encode()).hexdigest()
+    return int(h[:15], 16)  # 60 bits, comfortably within BIGINT

@@ -1,0 +1,88 @@
+"""Domain models shared across services. Pure data, no I/O."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+
+
+class Sport(str, Enum):
+    SOCCER = "soccer"
+    TENNIS = "tennis"
+    BASKETBALL = "basketball"
+
+
+class MarketStatus(str, Enum):
+    PREMATCH = "prematch"
+    LIVE = "live"
+    CLOSED = "closed"
+
+
+class SignalStatus(str, Enum):
+    DETECTED = "detected"          # value found, awaiting approval / placement
+    APPROVED = "approved"          # human approved (if approval required)
+    PLACED = "placed"              # bet placed on Stoiximan
+    REJECTED = "rejected"          # human rejected or filter failed downstream
+    EXPIRED = "expired"            # odds moved before placement
+
+
+@dataclass(frozen=True)
+class Quote:
+    """A single price for one selection from one source at a point in time."""
+
+    source: str                    # "betfair" | "pinnacle" | "stoiximan"
+    selection: str                 # canonical selection name (e.g. home team)
+    decimal_odds: float
+    captured_at: datetime
+    # For exchanges, available liquidity at this price (None for fixed-odds books).
+    liquidity: float | None = None
+
+
+@dataclass(frozen=True)
+class MarketSnapshot:
+    """All quotes for one market from one source, at one capture instant."""
+
+    event_id: str
+    market_id: str
+    market_type: str               # e.g. "MATCH_ODDS", "1X2"
+    sport: Sport
+    status: MarketStatus
+    start_time: datetime
+    quotes: list[Quote] = field(default_factory=list)
+
+    def selections(self) -> list[str]:
+        return [q.selection for q in self.quotes]
+
+    def quote_for(self, selection: str) -> Quote | None:
+        for q in self.quotes:
+            if q.selection == selection:
+                return q
+        return None
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    """Output of one engine scan: the raw snapshots fetched (for storage/CLV) and
+    the value signals detected. Fetching happens once, here, so callers never
+    re-hit the source APIs to persist odds."""
+
+    snapshots: list["MarketSnapshot"]
+    signals: list["ValueSignal"]
+
+
+@dataclass(frozen=True)
+class ValueSignal:
+    """A detected value opportunity, ready for sizing/placement."""
+
+    event_id: str
+    market_id: str
+    market_type: str
+    selection: str
+    sport: Sport
+    fair_prob: float               # de-vigged reference probability (Betfair)
+    confirm_prob: float | None     # de-vigged Pinnacle probability (confirmation)
+    target_odds: float             # odds offered by the target book (Stoiximan)
+    edge: float                    # expected ROI per unit stake at target_odds
+    recommended_stake: float
+    detected_at: datetime
