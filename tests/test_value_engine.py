@@ -15,8 +15,13 @@ def _engine(**overrides):
         kelly_fraction=overrides.get("kelly_fraction", 0.25),
         max_stake=overrides.get("max_stake", 10.0),
         bankroll=overrides.get("bankroll", 500.0),
+        sport_overrides={
+            "soccer": {
+                "edge_threshold": overrides.get("edge_threshold", 0.049),
+            }
+        }
     )
-    return ValueEngine(betfair, pinnacle, stoiximan, settings=settings)
+    return ValueEngine(betfair, pinnacle, [stoiximan], settings=settings)
 
 
 def test_detects_value_on_overpriced_favorite():
@@ -57,8 +62,15 @@ def _engine_without_pinnacle_match(require_confirmation: bool):
     betfair, _, stoiximan = demo_sources()
     # Pinnacle has totally different events -> no market will match.
     pinnacle = MockSource("pinnacle", {"9.999": [("Other X", 1.5), ("Other Y", 2.6)]})
-    settings = Settings(require_confirmation=require_confirmation)
-    return ValueEngine(betfair, pinnacle, stoiximan, settings=settings)
+    settings = Settings(
+        require_confirmation=require_confirmation,
+        sport_overrides={
+            "soccer": {
+                "edge_threshold": 0.049,
+            }
+        }
+    )
+    return ValueEngine(betfair, pinnacle, [stoiximan], settings=settings)
 
 
 def test_require_confirmation_skips_when_no_pinnacle_price():

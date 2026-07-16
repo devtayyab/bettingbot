@@ -76,7 +76,10 @@ class OddsSnapshot(Base):
     market_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     selection: Mapped[str] = mapped_column(String(128), primary_key=True)
     decimal_odds: Mapped[float] = mapped_column(Float)
-    liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lay_odds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    back_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lay_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    total_matched: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         Index("ix_odds_event_source_time", "event_id", "source", "captured_at"),
@@ -119,6 +122,8 @@ class Bet(Base):
     selection: Mapped[str] = mapped_column(String(128))
     placed_odds: Mapped[float] = mapped_column(Float)
     stake: Mapped[float] = mapped_column(Float)
+    actual_edge: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    clv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # pending / won / lost / void / failed
     outcome: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

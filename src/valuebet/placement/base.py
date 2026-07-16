@@ -11,6 +11,7 @@ class PlacementRequest:
     event_id: str
     market_type: str
     selection: str
+    target_odds: float
     stake: float
     # Reject if the live price has dropped below this (odds moved against us).
     min_odds: float

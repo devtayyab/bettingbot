@@ -93,16 +93,20 @@ class BetfairSource:
             quotes: list[Quote] = []
             for runner in book.runners:
                 back = runner.ex.available_to_back
-                if not back:
+                lay = runner.ex.available_to_lay
+                if not back or not lay:
                     continue
-                best = back[0]
+                best_back = back[0]
+                best_lay = lay[0]
                 quotes.append(
                     Quote(
                         source=self.name,
                         selection=runner_name.get(runner.selection_id, str(runner.selection_id)),
-                        decimal_odds=best.price,
+                        decimal_odds=best_back.price,
+                        lay_odds=best_lay.price,
+                        back_liquidity=best_back.size,
+                        lay_liquidity=best_lay.size,
                         captured_at=now,
-                        liquidity=best.size,
                     )
                 )
             if not quotes:
@@ -115,6 +119,7 @@ class BetfairSource:
                     sport=sport,
                     status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
                     start_time=cat.market_start_time or now,
+                    total_matched=book.total_matched,
                     quotes=quotes,
                 )
             )

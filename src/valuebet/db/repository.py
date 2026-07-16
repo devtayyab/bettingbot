@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.models import MarketSnapshot, ValueSignal
-from .models import Bet, OddsSnapshot, Signal
+from .models import Bet, Event, Market, OddsSnapshot, Signal
+from ..core.results import MockResultResolver, BetOutcome
 
 # Statuses for which a signal is considered "still live" and must not be re-created.
 OPEN_STATUSES = ("detected", "approved")
@@ -89,11 +90,13 @@ def record_bet(
     dry_run: bool,
     note: str | None = None,
 ) -> Bet:
+    actual_edge = (signal.fair_prob * placed_odds) - 1.0 if signal.fair_prob else None
     bet = Bet(
         signal_id=signal.id,
         selection=signal.selection,
         placed_odds=placed_odds,
         stake=stake,
+        actual_edge=actual_edge,
         outcome="pending",
         dry_run=dry_run,
         note=note,
@@ -123,6 +126,18 @@ def pnl_summary(session: Session) -> dict:
     }
 
 
+def get_event_exposure(session: Session, event_id: int) -> float:
+    """Return the total staked amount for all bets on a given event."""
+    stmt = (
+        select(Bet.stake)
+        .join(Signal)
+        .where(Signal.event_id == event_id)
+        .where(Bet.outcome.in_(("pending", "won", "lost")))
+    )
+    stakes = session.scalars(stmt).all()
+    return sum(stakes) if stakes else 0.0
+
+
 def _safe_event_id(raw: str | int) -> int:
     """Source event ids are strings; map them to a stable int for storage.
 
@@ -137,3 +152,58 @@ def _safe_event_id(raw: str | int) -> int:
         return int(digits[:18])
     h = hashlib.sha256(str(raw).encode()).hexdigest()
     return int(h[:15], 16)  # 60 bits, comfortably within BIGINT
+
+
+def update_clv_for_pending_bets(session: Session) -> int:
+    """Find pending bets for events starting within 10 minutes, calculate CLV, and save."""
+    from .models import Event
+    from ..core.odds_math import implied_prob, midpoint_prob
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    target_time = now + timedelta(minutes=10)
+
+    # Find pending bets with no CLV where the event starts soon
+    stmt = (
+        select(Bet, Signal, Event)
+        .join(Signal, Bet.signal_id == Signal.id)
+        .join(Event, Signal.event_id == Event.id)
+        .where(Bet.outcome == "pending")
+        .where(Bet.clv == None)
+        .where(Event.start_time <= target_time)
+    )
+    
+    rows = session.execute(stmt).all()
+    updated = 0
+
+    for bet, signal, event in rows:
+        # Get the latest Betfair odds snapshot for this selection
+        snap_stmt = (
+            select(OddsSnapshot)
+            .where(OddsSnapshot.event_id == event.id)
+            .where(OddsSnapshot.source == "betfair")
+            .where(OddsSnapshot.selection == signal.selection)
+            .order_by(OddsSnapshot.captured_at.desc())
+            .limit(1)
+        )
+        snap = session.scalar(snap_stmt)
+        if snap:
+            # Reconstruct fair probability at closing
+            try:
+                if snap.lay_odds is not None:
+                    closing_prob = midpoint_prob(snap.decimal_odds, snap.lay_odds)
+                else:
+                    closing_prob = implied_prob(snap.decimal_odds)
+                
+                # CLV = (Placed Odds / Closing Fair Odds) - 1
+                closing_fair_odds = 1.0 / closing_prob if closing_prob > 0 else 0
+                if closing_fair_odds > 0:
+                    bet.clv = (bet.placed_odds / closing_fair_odds) - 1.0
+                    updated += 1
+            except ValueError:
+                pass
+
+    if updated > 0:
+        session.flush()
+        
+    return updated

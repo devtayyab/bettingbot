@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: valuebet
       POSTGRES_DB: valuebet
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - dbdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +18,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,7 +39,10 @@ services:
       redis: { condition: service_healthy }
 
   scheduler:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_BROWSERS: "true"
     command: python -m valuebet.scheduler.run
     env_file: .env
     environment:

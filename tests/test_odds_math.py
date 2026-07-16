@@ -14,6 +14,8 @@ from valuebet.core.odds_math import (
     kelly_fraction,
     kelly_stake,
     overround,
+    midpoint_prob,
+    devig_from_probs,
 )
 
 
@@ -29,6 +31,19 @@ def test_implied_prob_rejects_invalid():
         implied_prob(0.5)
 
 
+def test_midpoint_prob():
+    # back=2.0 (50%), lay=2.2 (45.45%), midpoint ~ 47.72%
+    mp = midpoint_prob(2.0, 2.2)
+    assert mp == pytest.approx((0.5 + 1 / 2.2) / 2)
+
+
+def test_midpoint_prob_rejects_invalid():
+    with pytest.raises(ValueError):
+        midpoint_prob(0.5, 2.0)
+    with pytest.raises(ValueError):
+        midpoint_prob(2.0, 0.5)
+
+
 def test_overround_and_booksum():
     # A 2-way book at 1.90/1.90 has ~5.26% overround.
     odds = [1.90, 1.90]
@@ -40,6 +55,13 @@ def test_devig_multiplicative_sums_to_one():
     fair = devig([1.90, 1.90], DevigMethod.MULTIPLICATIVE)
     assert sum(fair) == pytest.approx(1.0)
     assert fair[0] == pytest.approx(0.5)
+
+
+def test_devig_from_probs():
+    raw_probs = [0.55, 0.49]
+    fair = devig_from_probs(raw_probs, DevigMethod.MULTIPLICATIVE)
+    assert sum(fair) == pytest.approx(1.0)
+    assert fair[0] == pytest.approx(0.55 / 1.04)
 
 
 def test_devig_three_way_market():

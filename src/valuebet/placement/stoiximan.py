@@ -104,11 +104,23 @@ class StoiximanPlacer:
         page.wait_for_load_state("networkidle")
 
     def _navigate_to_selection(self, page, request: PlacementRequest) -> None:
-        # Real impl: search the event, open its market, click the selection to add
-        # it to the bet slip. Left as an integration point keyed by event/selection.
-        raise NotImplementedError(
-            "navigate_to_selection: implement Stoiximan event search + selection click"
-        )
+        # Generic flow to find the selection via search:
+        try:
+            # 1. Click search icon/bar (assuming standard selector)
+            self._maybe_click(page, "[data-qa='search-icon']")
+            page.fill("input[type='search']", request.selection)
+            
+            # 2. Click the first matching event result
+            page.click("[data-qa='search-result']:first-child", timeout=5000)
+            page.wait_for_load_state("networkidle")
+            
+            # 3. Find the odds button containing the specific price/selection and click it
+            # Using text matching as a generic fallback since we don't know exact classes
+            odds_str = str(request.target_odds).replace(".", ",")
+            page.click(f"button:has-text('{odds_str}')", timeout=5000)
+        except Exception as e:
+            log.error("navigate_to_selection_failed", error=str(e), selection=request.selection)
+            raise RuntimeError(f"Failed to navigate to {request.selection}") from e
 
     def _read_live_odds(self, page) -> float | None:
         text = page.text_content(SELECTORS["bet_slip_odds"])

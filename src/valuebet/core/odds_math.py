@@ -33,6 +33,18 @@ def implied_prob(decimal_odds: float) -> float:
     return 1.0 / decimal_odds
 
 
+def midpoint_prob(back_odds: float, lay_odds: float) -> float:
+    """Calculate the midpoint probability from exchange back and lay odds.
+    
+    This is mathematically sounder than just taking the midpoint of the odds themselves.
+    """
+    if back_odds <= 1.0 or lay_odds <= 1.0:
+        raise ValueError(f"odds must be > 1.0, got back={back_odds}, lay={lay_odds}")
+    p_back = 1.0 / back_odds
+    p_lay = 1.0 / lay_odds
+    return (p_back + p_lay) / 2.0
+
+
 def booksum(decimal_odds: list[float]) -> float:
     """Sum of implied probabilities across a market = 1 + overround."""
     return sum(implied_prob(o) for o in decimal_odds)
@@ -51,22 +63,29 @@ def devig(decimal_odds: list[float], method: DevigMethod = DevigMethod.MULTIPLIC
     if not decimal_odds:
         return []
     raw = [implied_prob(o) for o in decimal_odds]
-    total = sum(raw)
+    return devig_from_probs(raw, method)
+
+
+def devig_from_probs(raw_probs: list[float], method: DevigMethod = DevigMethod.MULTIPLICATIVE) -> list[float]:
+    """Return fair probabilities given a list of raw (margin-included) probabilities."""
+    if not raw_probs:
+        return []
+    total = sum(raw_probs)
 
     if method is DevigMethod.MULTIPLICATIVE:
-        return [p / total for p in raw]
+        return [p / total for p in raw_probs]
 
     if method is DevigMethod.ADDITIVE:
-        n = len(raw)
+        n = len(raw_probs)
         margin = total - 1.0
-        fair = [p - margin / n for p in raw]
+        fair = [p - margin / n for p in raw_probs]
         # Renormalise to guard against tiny negatives on lopsided books.
         fair = [max(p, 1e-9) for p in fair]
         s = sum(fair)
         return [p / s for p in fair]
 
     if method is DevigMethod.SHIN:
-        return _shin_devig(raw)
+        return _shin_devig(raw_probs)
 
     raise ValueError(f"unknown devig method: {method}")
 
