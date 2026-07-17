@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.models import MarketSnapshot, ValueSignal
-from .models import Bet, Event, Market, OddsSnapshot, Signal
+from .models import Bet, BookmakerLimitEvent, Event, Market, OddsSnapshot, Signal
 from ..core.results import MockResultResolver, BetOutcome
 
 # Statuses for which a signal is considered "still live" and must not be re-created.
@@ -86,15 +86,18 @@ def record_bet(
     session: Session,
     signal: Signal,
     placed_odds: float,
-    stake: float,
+    stake: float,                   # accepted stake (what bookmaker took)
     dry_run: bool,
     note: str | None = None,
+    requested_stake: float | None = None,  # Feature 3: what we asked for
 ) -> Bet:
     actual_edge = (signal.fair_prob * placed_odds) - 1.0 if signal.fair_prob else None
+    _requested = requested_stake if requested_stake is not None else stake
     bet = Bet(
         signal_id=signal.id,
         selection=signal.selection,
         placed_odds=placed_odds,
+        requested_stake=_requested,     # Feature 3
         stake=stake,
         actual_edge=actual_edge,
         outcome="pending",
@@ -207,3 +210,65 @@ def update_clv_for_pending_bets(session: Session) -> int:
         session.flush()
         
     return updated
+
+
+# ---------------------------------------------------------------------------
+# Feature 4: Bookmaker Limit Tracking — DB persistence
+# ---------------------------------------------------------------------------
+
+def save_limit_event(
+    session: Session,
+    bookmaker: str,
+    requested_stake: float,
+    accepted_stake: float,
+    was_rejected: bool,
+    note: str | None = None,
+) -> BookmakerLimitEvent:
+    """Persist one stake-acceptance record to the DB."""
+    ratio = (accepted_stake / requested_stake) if requested_stake > 0 else 0.0
+    event = BookmakerLimitEvent(
+        bookmaker=bookmaker,
+        requested_stake=requested_stake,
+        accepted_stake=accepted_stake,
+        acceptance_ratio=round(ratio, 4),
+        was_rejected=was_rejected,
+        note=note,
+        placed_at=datetime.now(timezone.utc),
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def bookmaker_limit_summary(session: Session, bookmaker: str, last_n: int = 50) -> dict:
+    """Query DB for the last N limit events and compute aggregate acceptance stats."""
+    stmt = (
+        select(BookmakerLimitEvent)
+        .where(BookmakerLimitEvent.bookmaker == bookmaker)
+        .order_by(BookmakerLimitEvent.placed_at.desc())
+        .limit(last_n)
+    )
+    events = list(session.scalars(stmt))
+    if not events:
+        return {"bookmaker": bookmaker, "total_events": 0,
+                "acceptance_rate": None, "is_likely_limited": False}
+
+    total_requested = sum(e.requested_stake for e in events)
+    total_accepted = sum(e.accepted_stake for e in events)
+    rate = (total_accepted / total_requested) if total_requested > 0 else 0.0
+    rejections = sum(1 for e in events if e.was_rejected)
+    return {
+        "bookmaker": bookmaker,
+        "total_events": len(events),
+        "acceptance_rate": round(rate, 4),
+        "is_likely_limited": rate < 0.70 and len(events) >= 5,
+        "rejection_count": rejections,
+        "last_event": events[0].placed_at.isoformat() if events else None,
+    }
+
+
+def all_bookmaker_limit_summaries(session: Session) -> list[dict]:
+    """Return limit summaries for all bookmakers that have events."""
+    stmt = select(BookmakerLimitEvent.bookmaker).distinct()
+    bookmakers = list(session.scalars(stmt))
+    return [bookmaker_limit_summary(session, bk) for bk in bookmakers]

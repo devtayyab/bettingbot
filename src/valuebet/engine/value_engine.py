@@ -29,7 +29,9 @@ from ..core.odds_math import (
     kelly_stake,
 )
 from ..core.wallet import MockWalletManager
-from .score import DummyScoreTracker, states_match
+from .score import CompositeScoreTracker, DummyScoreTracker, BetfairScoreTracker, PlaywrightScoreReader, states_match
+from ..db.session import session_scope
+from ..db.repository import get_event_exposure, _safe_event_id
 
 log = get_logger("engine.value")
 
@@ -47,7 +49,14 @@ class ValueEngine:
         self.targets = targets
         self.settings = settings or get_settings()
         self.wallet = MockWalletManager()
-        self.score_tracker = DummyScoreTracker()
+        if self.settings.env == "dev":
+            self.score_tracker = DummyScoreTracker()
+        else:
+            bf_client = getattr(self.reference, "_client", None)
+            self.score_tracker = CompositeScoreTracker(
+                BetfairScoreTracker(bf_client),
+                PlaywrightScoreReader(headless=True)
+            )
 
     def scan(self, sport: Sport, live: bool = False) -> ScanResult:
         """Fetch every source once, detect value, and return both the raw snapshots
@@ -103,6 +112,11 @@ class ValueEngine:
         # 1. Market Health - Total Matched Volume
         if reference.total_matched is not None and reference.total_matched < min_total_matched:
             log.info("market_health_rejected", reason="low_total_matched", value=reference.total_matched)
+            return []
+
+        # Feature 2: Suspension detection
+        if reference.is_suspended or target.is_suspended:
+            log.info("market_suspended", event_id=target.event_id)
             return []
 
         ref_quotes = reference.quotes
@@ -185,6 +199,13 @@ class ValueEngine:
                 continue
 
             # 6. Size it.
+            # Feature 6: Event exposure cap (Correlated Bets)
+            with session_scope() as session:
+                current_exposure = get_event_exposure(session, _safe_event_id(target.event_id))
+            if current_exposure >= s.max_event_exposure:
+                log.info("event_exposure_cap_reached", event_id=target.event_id, current=current_exposure)
+                return []  # Cap reached, skip all further selections for this event
+
             # Calculate fractional Kelly stake using dynamic bookmaker balance
             dynamic_bankroll = self.wallet.get_balance(tq.source)
             if dynamic_bankroll < 5.0:

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import time
 from typing import Any
 
-from ..core.models import MarketSnapshot, MarketStatus, Quote, Sport
+from ..core.models import MarketSnapshot, MarketStatus, Quote, SettlementRule, Sport
 from ..logging import get_logger
 
 log = get_logger("sources.stoiximan")
@@ -86,6 +86,7 @@ class StoiximanSource:
                                     status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
                                     start_time=now, # Real start time needs to be scraped
                                     quotes=quotes,
+                                    settlement_rule=SettlementRule.REGULATION_TIME, # Feature 5
                                 )
                             )
                     except Exception as e:

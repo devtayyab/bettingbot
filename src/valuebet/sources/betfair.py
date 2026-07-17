@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import get_settings
-from ..core.models import MarketSnapshot, MarketStatus, Quote, Sport
+from ..core.models import MarketSnapshot, MarketStatus, Quote, SettlementRule, Sport
 from ..logging import get_logger
 
 log = get_logger("source.betfair")
@@ -111,6 +111,12 @@ class BetfairSource:
                 )
             if not quotes:
                 continue
+            # Feature 2: Detect if the market is suspended
+            is_suspended = getattr(book, "status", "ACTIVE") == "SUSPENDED"
+
+            # Feature 5: Map market type to settlement rule
+            rule = SettlementRule.REGULATION_TIME if cat.market_name == "Match Odds" else SettlementRule.UNKNOWN
+
             snapshots.append(
                 MarketSnapshot(
                     event_id=cat.event.id,
@@ -121,6 +127,8 @@ class BetfairSource:
                     start_time=cat.market_start_time or now,
                     total_matched=book.total_matched,
                     quotes=quotes,
+                    is_suspended=is_suspended,
+                    settlement_rule=rule,
                 )
             )
         log.info("betfair_fetch", sport=sport.value, markets=len(snapshots), live=live)

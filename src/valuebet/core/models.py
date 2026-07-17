@@ -27,6 +27,24 @@ class SignalStatus(str, Enum):
     EXPIRED = "expired"            # odds moved before placement
 
 
+class SettlementRule(str, Enum):
+    """Settlement rule for a market — must match exactly across sources.
+
+    REGULATION_TIME: 90 min only (no extra time). Most football 1X2 markets.
+    INCLUDING_OT:    Result after extra time / overtime counts.
+    QUALIFICATION:   Advances in the competition (two-legged tie aggregate).
+    SETS:            Winner determined by sets (tennis, volleyball).
+    POINTS:          Total points / games market.
+    UNKNOWN:         Rule could not be determined; matching will be conservative.
+    """
+    REGULATION_TIME = "regulation_time"
+    INCLUDING_OT = "including_ot"
+    QUALIFICATION = "qualification"
+    SETS = "sets"
+    POINTS = "points"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class Quote:
     """A single price for one selection from one source at a point in time."""
@@ -54,6 +72,11 @@ class MarketSnapshot:
     start_time: datetime
     total_matched: float | None = None
     quotes: list[Quote] = field(default_factory=list)
+    # Feature 2: Suspension detection — True when Betfair suspends the market
+    # (e.g., goal scored, match interruption). Never bet into a suspended market.
+    is_suspended: bool = False
+    # Feature 5: Settlement rule — must match exactly between reference and target.
+    settlement_rule: SettlementRule = SettlementRule.UNKNOWN
 
     def selections(self) -> list[str]:
         return [q.selection for q in self.quotes]
