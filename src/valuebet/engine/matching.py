@@ -8,12 +8,12 @@ the market rather than risk acting on a mismatch.
 
 from __future__ import annotations
 
-import logging
 import re
 
 from ..core.models import MarketSnapshot, SettlementRule
+from ..logging import get_logger
 
-log = logging.getLogger("engine.matching")
+log = get_logger("engine.matching")
 
 _NORMALISE_RE = re.compile(r"[^a-z0-9]+")
 # Common aliases / noise tokens stripped before comparison.
