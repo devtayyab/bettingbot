@@ -27,6 +27,7 @@ def _signal(selection="Team A", edge=0.07):
     return ValueSignal(
         event_id="evt-abc", market_id="m1", market_type="MATCH_ODDS",
         selection=selection, sport=Sport.SOCCER, fair_prob=0.6, confirm_prob=0.59,
+        target_bookmaker="stoiximan",
         target_odds=1.8, edge=edge, recommended_stake=10.0,
         detected_at=datetime.now(timezone.utc),
     )

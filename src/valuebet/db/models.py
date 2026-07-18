@@ -76,7 +76,10 @@ class OddsSnapshot(Base):
     market_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     selection: Mapped[str] = mapped_column(String(128), primary_key=True)
     decimal_odds: Mapped[float] = mapped_column(Float)
-    liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lay_odds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    back_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lay_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    total_matched: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         Index("ix_odds_event_source_time", "event_id", "source", "captured_at"),
@@ -118,7 +121,11 @@ class Bet(Base):
     book: Mapped[str] = mapped_column(String(32), default="stoiximan")
     selection: Mapped[str] = mapped_column(String(128))
     placed_odds: Mapped[float] = mapped_column(Float)
-    stake: Mapped[float] = mapped_column(Float)
+    # Feature 3: Track requested vs accepted stake to detect bookmaker stake reduction.
+    requested_stake: Mapped[float] = mapped_column(Float)           # What we asked for
+    stake: Mapped[float] = mapped_column(Float)                     # What was accepted
+    actual_edge: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    clv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # pending / won / lost / void / failed
     outcome: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -129,3 +136,28 @@ class Bet(Base):
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     signal: Mapped[Signal] = relationship(back_populates="bet")
+
+
+class BookmakerLimitEvent(Base):
+    """Feature 4: One stake-acceptance record per placement attempt.
+
+    Accumulates over time so the operator can monitor account health:
+    when acceptance_rate drops below ~70%, the account is likely being limited.
+    """
+
+    __tablename__ = "bookmaker_limit_events"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    bookmaker: Mapped[str] = mapped_column(String(32), index=True)
+    requested_stake: Mapped[float] = mapped_column(Float)
+    accepted_stake: Mapped[float] = mapped_column(Float)
+    acceptance_ratio: Mapped[float] = mapped_column(Float)  # accepted / requested
+    was_rejected: Mapped[bool] = mapped_column(default=False)
+    note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    placed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    __table_args__ = (
+        Index("ix_limit_events_bookmaker_time", "bookmaker", "placed_at"),
+    )

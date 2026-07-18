@@ -30,8 +30,15 @@ class MockSource:
                     sport=sport,
                     status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
                     start_time=now + timedelta(hours=2),
+                    total_matched=10000.0,
                     quotes=[
-                        Quote(self.name, sel, odds, now, liquidity=5000.0)
+                        Quote(
+                            source=self.name,
+                            selection=sel,
+                            decimal_odds=odds,
+                            captured_at=now,
+                            back_liquidity=5000.0
+                        )
                         for sel, odds in quotes
                     ],
                 )

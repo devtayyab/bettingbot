@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import re
 
-from ..core.models import MarketSnapshot
+from ..core.models import MarketSnapshot, SettlementRule
+from ..logging import get_logger
+
+log = get_logger("engine.matching")
 
 _NORMALISE_RE = re.compile(r"[^a-z0-9]+")
 # Common aliases / noise tokens stripped before comparison.
@@ -37,6 +40,14 @@ def match_markets(
     for cand in candidates:
         if cand.market_type != target.market_type or cand.sport != target.sport:
             continue
+            
+        # Feature 5: Settlement Rule matching
+        if (cand.settlement_rule != SettlementRule.UNKNOWN and 
+            target.settlement_rule != SettlementRule.UNKNOWN and 
+            cand.settlement_rule != target.settlement_rule):
+            log.debug("settlement_rule_mismatch", target=target.settlement_rule, cand=cand.settlement_rule)
+            continue
+            
         cand_keys = {selection_key(s) for s in cand.selections()}
         overlap = len(target_keys & cand_keys)
         if overlap > best_overlap:

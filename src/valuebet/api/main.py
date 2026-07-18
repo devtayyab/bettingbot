@@ -11,7 +11,14 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..core.models import Sport
 from ..db.models import Bet, Signal
-from ..db.repository import open_signals, pnl_summary, record_bet
+from ..db.repository import (
+    all_bookmaker_limit_summaries,
+    bookmaker_limit_summary,
+    open_signals,
+    pnl_summary,
+    record_bet,
+    save_limit_event,
+)
 from ..db.session import session_scope
 from ..logging import configure_logging, get_logger
 from ..pipeline import run_scan
@@ -128,15 +135,34 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
                 "signal_id": signal_id, "bet_id": None, "success": False,
                 "dry_run": result.dry_run, "message": result.message,
                 "placed_odds": result.placed_odds,
+                "requested_stake": result.requested_stake,
+                "accepted_stake": result.accepted_stake,
+                "stake_reduced": result.was_stake_reduced,
             }
         bet = record_bet(
-            session, sig, placed_odds=result.placed_odds or sig.target_odds,
-            stake=result.stake, dry_run=result.dry_run, note=result.message,
+            session, sig,
+            placed_odds=result.placed_odds or sig.target_odds,
+            stake=result.accepted_stake,              # Feature 3: accepted amount
+            requested_stake=result.requested_stake,  # Feature 3: what we asked
+            dry_run=result.dry_run, note=result.message,
         )
+        # Feature 4: also persist limit event to DB
+        if not result.dry_run:
+            save_limit_event(
+                session,
+                bookmaker="stoiximan",
+                requested_stake=result.requested_stake,
+                accepted_stake=result.accepted_stake,
+                was_rejected=not result.success,
+                note=result.message,
+            )
         return {
             "signal_id": signal_id, "bet_id": bet.id, "success": result.success,
             "dry_run": result.dry_run, "message": result.message,
             "placed_odds": result.placed_odds,
+            "requested_stake": result.requested_stake,
+            "accepted_stake": result.accepted_stake,
+            "stake_reduced": result.was_stake_reduced,
         }
 
 
@@ -166,6 +192,28 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
 def pnl() -> dict:
     with session_scope() as session:
         return pnl_summary(session)
+
+
+# ---------------------------------------------------------------------------
+# Feature 4: Bookmaker Limit / Account Health endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/limits")
+def get_all_limits() -> list[dict]:
+    """Return stake-acceptance summary for all bookmakers.
+
+    An acceptance_rate below 0.70 with at least 5 bets indicates the account
+    is likely being limited and the operator should investigate.
+    """
+    with session_scope() as session:
+        return all_bookmaker_limit_summaries(session)
+
+
+@app.get("/limits/{bookmaker}")
+def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
+    """Return stake-acceptance summary for one bookmaker."""
+    with session_scope() as session:
+        return bookmaker_limit_summary(session, bookmaker, last_n)
 
 
 @app.get("/", response_class=HTMLResponse)

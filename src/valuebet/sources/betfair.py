@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import get_settings
-from ..core.models import MarketSnapshot, MarketStatus, Quote, Sport
+from ..core.models import MarketSnapshot, MarketStatus, Quote, SettlementRule, Sport
 from ..logging import get_logger
 
 log = get_logger("source.betfair")
@@ -93,20 +93,30 @@ class BetfairSource:
             quotes: list[Quote] = []
             for runner in book.runners:
                 back = runner.ex.available_to_back
-                if not back:
+                lay = runner.ex.available_to_lay
+                if not back or not lay:
                     continue
-                best = back[0]
+                best_back = back[0]
+                best_lay = lay[0]
                 quotes.append(
                     Quote(
                         source=self.name,
                         selection=runner_name.get(runner.selection_id, str(runner.selection_id)),
-                        decimal_odds=best.price,
+                        decimal_odds=best_back.price,
+                        lay_odds=best_lay.price,
+                        back_liquidity=best_back.size,
+                        lay_liquidity=best_lay.size,
                         captured_at=now,
-                        liquidity=best.size,
                     )
                 )
             if not quotes:
                 continue
+            # Feature 2: Detect if the market is suspended
+            is_suspended = getattr(book, "status", "ACTIVE") == "SUSPENDED"
+
+            # Feature 5: Map market type to settlement rule
+            rule = SettlementRule.REGULATION_TIME if cat.market_name == "Match Odds" else SettlementRule.UNKNOWN
+
             snapshots.append(
                 MarketSnapshot(
                     event_id=cat.event.id,
@@ -115,7 +125,10 @@ class BetfairSource:
                     sport=sport,
                     status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
                     start_time=cat.market_start_time or now,
+                    total_matched=book.total_matched,
                     quotes=quotes,
+                    is_suspended=is_suspended,
+                    settlement_rule=rule,
                 )
             )
         log.info("betfair_fetch", sport=sport.value, markets=len(snapshots), live=live)

@@ -20,12 +20,20 @@ from datetime import datetime, timezone
 
 from ..config import Settings, get_settings
 from ..core import odds_math
-from ..core.models import MarketSnapshot, ScanResult, Sport, ValueSignal
+from ..core.models import MarketSnapshot, MarketStatus, ScanResult, Sport, ValueSignal
 from ..logging import get_logger
 from ..sources.base import OddsSource
 from .matching import match_markets, selection_key
+from ..core.odds_math import (
+    fair_odds,
+    kelly_stake,
+)
+from ..core.wallet import MockWalletManager
+from .score import CompositeScoreTracker, DummyScoreTracker, BetfairScoreTracker, PlaywrightScoreReader, states_match
+from ..db.session import session_scope
+from ..db.repository import get_event_exposure, _safe_event_id
 
-log = get_logger("engine")
+log = get_logger("engine.value")
 
 
 class ValueEngine:
@@ -33,31 +41,59 @@ class ValueEngine:
         self,
         reference: OddsSource,   # Betfair
         confirmation: OddsSource,  # Pinnacle
-        target: OddsSource,        # Stoiximan (book we'd bet into)
+        targets: list[OddsSource], # Target bookies to bet into (e.g. [Stoiximan, Bet365])
         settings: Settings | None = None,
     ) -> None:
         self.reference = reference
         self.confirmation = confirmation
-        self.target = target
+        self.targets = targets
         self.settings = settings or get_settings()
+        self.wallet = MockWalletManager()
+        if self.settings.env == "dev":
+            self.score_tracker = DummyScoreTracker()
+        else:
+            bf_client = getattr(self.reference, "_client", None)
+            self.score_tracker = CompositeScoreTracker(
+                BetfairScoreTracker(bf_client),
+                PlaywrightScoreReader(headless=True)
+            )
 
     def scan(self, sport: Sport, live: bool = False) -> ScanResult:
         """Fetch every source once, detect value, and return both the raw snapshots
         (for persistence/CLV) and the signals. Sources are hit exactly once here."""
         ref_markets = self.reference.fetch_markets(sport, live)
         conf_markets = self.confirmation.fetch_markets(sport, live)
-        target_markets = self.target.fetch_markets(sport, live)
-
+        
+        all_snapshots = ref_markets + conf_markets
         signals: list[ValueSignal] = []
-        for tgt in target_markets:
-            ref = match_markets(tgt, ref_markets)
-            if ref is None:
-                continue
-            conf = match_markets(tgt, conf_markets)
-            signals.extend(self._evaluate_market(sport, tgt, ref, conf))
+
+        for target_src in self.targets:
+            target_markets = target_src.fetch_markets(sport, live)
+
+            if live:
+                # For live betting, we must ensure score synchronisation
+                # otherwise we abort the scan for desynced events.
+                synced_target_markets = []
+                for t_mkt in target_markets:
+                    ref_state = self.score_tracker.get_state(t_mkt.event_id, self.reference.name)
+                    tar_state = self.score_tracker.get_state(t_mkt.event_id, target_src.name)
+                    if states_match(ref_state, tar_state):
+                        synced_target_markets.append(t_mkt)
+                    else:
+                        log.debug("event_desynced_skipping", event_id=t_mkt.event_id)
+                target_markets = synced_target_markets
+
+            all_snapshots.extend(target_markets)
+            for tgt in target_markets:
+                ref = match_markets(tgt, ref_markets)
+                if ref is None:
+                    continue
+                conf = match_markets(tgt, conf_markets)
+                signals.extend(self._evaluate_market(sport, tgt, ref, conf))
+                
         log.info("scan_complete", sport=sport.value, live=live, signals=len(signals))
         return ScanResult(
-            snapshots=ref_markets + conf_markets + target_markets, signals=signals
+            snapshots=all_snapshots, signals=signals
         )
 
     def _evaluate_market(
@@ -68,19 +104,49 @@ class ValueEngine:
         confirmation: MarketSnapshot | None,
     ) -> list[ValueSignal]:
         s = self.settings
+        sport_cfg = self.settings.get_sport_config(sport.value)
+        min_total_matched = sport_cfg["min_total_matched"]
+        max_spread = sport_cfg["max_spread"]
+        min_liquidity = sport_cfg["min_liquidity"]
+        
+        # 1. Market Health - Total Matched Volume
+        if reference.total_matched is not None and reference.total_matched < min_total_matched:
+            log.info("market_health_rejected", reason="low_total_matched", value=reference.total_matched)
+            return []
+
+        # Feature 2: Suspension detection
+        if reference.is_suspended or target.is_suspended:
+            log.info("market_suspended", event_id=target.event_id)
+            return []
+
         ref_quotes = reference.quotes
-        ref_fair = odds_math.devig(
-            [q.decimal_odds for q in ref_quotes], odds_math.DevigMethod.MULTIPLICATIVE
-        )
+        raw_probs = []
+        for q in ref_quotes:
+            if q.lay_odds is not None:
+                # 2. Market Health - Spread & Liquidity per selection
+                spread = (q.lay_odds - q.decimal_odds) / q.decimal_odds
+                if spread > max_spread:
+                    log.info("health_rejected", reason="spread_too_high", selection=q.selection, spread=spread)
+                    return []
+                
+                if (q.back_liquidity is not None and q.back_liquidity < min_liquidity) or \
+                   (q.lay_liquidity is not None and q.lay_liquidity < min_liquidity):
+                    log.info("health_rejected", reason="low_liquidity", selection=q.selection)
+                    return []
+                    
+                raw_probs.append(odds_math.midpoint_prob(q.decimal_odds, q.lay_odds))
+            else:
+                raw_probs.append(odds_math.implied_prob(q.decimal_odds))
+
+        ref_fair = odds_math.devig_from_probs(raw_probs, odds_math.DevigMethod.MULTIPLICATIVE)
         ref_fair_by_key = {
             selection_key(q.selection): p for q, p in zip(ref_quotes, ref_fair)
         }
 
         conf_fair_by_key: dict[str, float] = {}
         if confirmation is not None:
-            conf_fair = odds_math.devig(
-                [q.decimal_odds for q in confirmation.quotes], odds_math.DevigMethod.SHIN
-            )
+            conf_raw = [odds_math.implied_prob(q.decimal_odds) for q in confirmation.quotes]
+            conf_fair = odds_math.devig_from_probs(conf_raw, odds_math.DevigMethod.SHIN)
             conf_fair_by_key = {
                 selection_key(q.selection): p
                 for q, p in zip(confirmation.quotes, conf_fair)
@@ -100,8 +166,20 @@ class ValueEngine:
 
             # 4. Edge threshold against the target book's offered odds.
             e = odds_math.edge(fair_prob, tq.decimal_odds)
-            if e < s.edge_threshold:
+            
+            # Use higher threshold for live markets
+            is_live = (target.status == MarketStatus.LIVE)
+            required_edge = sport_cfg["live_edge_threshold"] if is_live else sport_cfg["edge_threshold"]
+            
+            if e < required_edge:
                 continue
+
+            # Latency protection for live markets
+            if is_live:
+                latency = (now - tq.captured_at).total_seconds()
+                if latency > s.max_live_latency_seconds:
+                    log.info("stale_odds_rejected", selection=tq.selection, latency=latency)
+                    continue
 
             # 5. Sharp confirmation (Pinnacle agrees with Betfair).
             confirm_prob = conf_fair_by_key.get(key)
@@ -121,10 +199,23 @@ class ValueEngine:
                 continue
 
             # 6. Size it.
-            stake = odds_math.kelly_stake(
-                fair_prob,
-                tq.decimal_odds,
-                bankroll=s.bankroll,
+            # Feature 6: Event exposure cap (Correlated Bets)
+            with session_scope() as session:
+                current_exposure = get_event_exposure(session, _safe_event_id(target.event_id))
+            if current_exposure >= s.max_event_exposure:
+                log.info("event_exposure_cap_reached", event_id=target.event_id, current=current_exposure)
+                return []  # Cap reached, skip all further selections for this event
+
+            # Calculate fractional Kelly stake using dynamic bookmaker balance
+            dynamic_bankroll = self.wallet.get_balance(tq.source)
+            if dynamic_bankroll < 5.0:
+                log.warning("insufficient_funds", bookmaker=tq.source, balance=dynamic_bankroll)
+                continue
+                
+            stake = kelly_stake(
+                fair_prob=fair_prob,
+                offered_odds=tq.decimal_odds,
+                bankroll=dynamic_bankroll,
                 fraction=s.kelly_fraction,
                 max_stake=s.max_stake,
             )
@@ -140,6 +231,7 @@ class ValueEngine:
                     sport=sport,
                     fair_prob=fair_prob,
                     confirm_prob=confirm_prob,
+                    target_bookmaker=tq.source,
                     target_odds=tq.decimal_odds,
                     edge=e,
                     recommended_stake=stake,

@@ -15,6 +15,7 @@ from .db.repository import save_signal, save_snapshots
 from .db.session import session_scope
 from .engine.value_engine import ValueEngine
 from .logging import get_logger
+from .notifier import Notifier
 from .sources.base import OddsSource
 from .sources.mock import demo_sources
 
@@ -22,8 +23,8 @@ log = get_logger("pipeline")
 
 
 @lru_cache(maxsize=1)
-def build_sources() -> tuple[OddsSource, OddsSource, OddsSource]:
-    """Return (reference, confirmation, target) = (Betfair, Pinnacle, Stoiximan)."""
+def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSource]:
+    """Return (reference, confirmation, targets_list, stream)."""
     s = get_settings()
     have_betfair = bool(s.betfair_app_key and s.betfair_username)
     have_pinnacle = bool(s.pinnacle_username)
@@ -31,33 +32,42 @@ def build_sources() -> tuple[OddsSource, OddsSource, OddsSource]:
     if not (have_betfair and have_pinnacle):
         log.warning("using_mock_sources", reason="missing Betfair/Pinnacle credentials")
         betfair, pinnacle, stoiximan = demo_sources()
-        return betfair, pinnacle, stoiximan
+        from .sources.betfair_stream import BetfairStreamSource
+        return betfair, pinnacle, [stoiximan], BetfairStreamSource(betfair)
 
     from .sources.betfair import BetfairSource
     from .sources.pinnacle import PinnacleSource
+    from .sources.stoiximan import StoiximanSource
+    from .sources.betfair_stream import BetfairStreamSource
 
-    # The target book has no API; for detection we read its public odds via the same
-    # OddsSource interface. For the pilot we reuse the mock target until a read-only
-    # Stoiximan odds reader is wired in.
-    _, _, stoiximan = demo_sources()
-    return BetfairSource(), PinnacleSource(), stoiximan
+    bf = BetfairSource()
+    targets = [StoiximanSource(headless=True)]
+    return bf, PinnacleSource(), targets, BetfairStreamSource(bf)
 
 
 def run_scan(sport: Sport, live: bool = False) -> int:
     """One full scan cycle. Returns the number of NEW signals persisted (deduped)."""
-    reference, confirmation, target = build_sources()
-    engine = ValueEngine(reference, confirmation, target)
+    reference, confirmation, targets, stream = build_sources()
+    
+    # Start stream lazily on first live scan
+    if live and not stream._is_running:
+        stream.start(sport)
+        
+    actual_reference = stream if live else reference
+    engine = ValueEngine(actual_reference, confirmation, targets)
 
     # Single fetch: the engine returns both the raw snapshots (for storage/CLV)
     # and the detected signals, so we never re-hit the source APIs.
     result = engine.scan(sport, live)
 
     new_signals = 0
+    notifier = Notifier()
     with session_scope() as session:
         rows = save_snapshots(session, result.snapshots)
         for sig in result.signals:
             if save_signal(session, sig) is not None:
                 new_signals += 1
+                notifier.notify_signal_detected(sig)
     log.info(
         "scan_persisted",
         sport=sport.value,
