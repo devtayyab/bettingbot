@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     betfair_cert_path: str = ""
     betfair_key_path: str = ""
 
+    # The Odds API
+    the_odds_api_key: str = ""
+
     # Pinnacle
     pinnacle_username: str = ""
     pinnacle_password: str = ""

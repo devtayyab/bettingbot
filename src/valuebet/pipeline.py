@@ -26,8 +26,20 @@ log = get_logger("pipeline")
 def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSource]:
     """Return (reference, confirmation, targets_list, stream)."""
     s = get_settings()
+    have_odds_api = bool(s.the_odds_api_key)
     have_betfair = bool(s.betfair_app_key and s.betfair_username)
     have_pinnacle = bool(s.pinnacle_username)
+
+    if have_odds_api:
+        log.info("using_the_odds_api_source")
+        from .sources.the_odds_api import TheOddsAPISource
+        from .sources.stoiximan import StoiximanSource
+        from .sources.betfair_stream import BetfairStreamSource
+
+        bf = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
+        pin = TheOddsAPISource(target_bookmaker="pinnacle", name="pinnacle")
+        targets = [StoiximanSource(headless=True)]
+        return bf, pin, targets, BetfairStreamSource(bf)
 
     if not (have_betfair and have_pinnacle):
         log.warning("using_mock_sources", reason="missing Betfair/Pinnacle credentials")
