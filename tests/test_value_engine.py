@@ -38,10 +38,10 @@ def test_detects_value_on_overpriced_favorite():
 
 def test_scan_returns_snapshots_for_persistence():
     result = _engine().scan(Sport.SOCCER)
-    # 3 sources x 2 markets x 3 selections = 18 quote rows to store.
-    assert len(result.snapshots) == 6
+    # 3 sources x 5 markets = 15 snapshots; 15 snapshots x 3 selections = 45 quotes.
+    assert len(result.snapshots) == 15
     total_quotes = sum(len(s.quotes) for s in result.snapshots)
-    assert total_quotes == 18
+    assert total_quotes == 45
 
 
 def test_favorite_filter_excludes_non_favorites():

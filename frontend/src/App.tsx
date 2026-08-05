@@ -48,6 +48,19 @@ function App() {
     }
   };
 
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      // Trigger a new scan first
+      await fetch(`${API_URL}/scan`, { method: 'POST' });
+      // Then fetch the updated signals
+      await fetchData();
+    } catch (err) {
+      console.error("Failed to run scan", err);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 15000);
@@ -64,11 +77,17 @@ function App() {
       if (res.ok) {
         fetchData();
       } else {
-        const err = await res.json();
-        alert(`Action failed: ${err.detail || 'Unknown error'}`);
+        let errorMsg = 'Unknown error';
+        try {
+          const err = await res.json();
+          errorMsg = err.detail || err.message || JSON.stringify(err);
+        } catch {
+          errorMsg = `${res.status} ${res.statusText}`;
+        }
+        alert(`Action failed: ${errorMsg}`);
       }
-    } catch (err) {
-      alert("Network error");
+    } catch (err: any) {
+      alert(`Network error: ${err.message || err}`);
     }
   };
 
@@ -123,8 +142,8 @@ function App() {
             <option value="placed">Placed</option>
             <option value="rejected">Rejected</option>
           </select>
-          <button className="btn btn-primary" onClick={fetchData}>
-            {loading ? <span className="loader">↻</span> : 'Refresh'}
+          <button className="btn btn-primary" onClick={handleRefresh} disabled={loading}>
+            {loading ? <span className="loader">↻</span> : 'Force Scan & Refresh'}
           </button>
         </div>
 

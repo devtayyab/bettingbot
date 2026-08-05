@@ -42,8 +42,27 @@ DASHBOARD_HTML = """
   <div class="cards" id="pnl"></div>
 
   <div class="bar">
-    <button class="toolbtn" onclick="scan('soccer',false)">Scan soccer (pre-match)</button>
-    <button class="toolbtn" onclick="scan('soccer',true)">Scan soccer (live)</button>
+    <select id="sport-select">
+      <option value="soccer">soccer</option>
+      <option value="tennis">tennis</option>
+      <option value="basketball">basketball</option>
+      <option value="american_football">american_football</option>
+      <option value="baseball">baseball</option>
+      <option value="ice_hockey">ice_hockey</option>
+      <option value="cricket">cricket</option>
+      <option value="rugby_league">rugby_league</option>
+      <option value="rugby_union">rugby_union</option>
+      <option value="golf">golf</option>
+      <option value="mma">mma</option>
+      <option value="boxing">boxing</option>
+      <option value="volleyball">volleyball</option>
+      <option value="handball">handball</option>
+      <option value="darts">darts</option>
+      <option value="esports">esports</option>
+      <option value="table_tennis">table_tennis</option>
+    </select>
+    <button class="toolbtn" onclick="scanSelected(false)">Scan (pre-match)</button>
+    <button class="toolbtn" onclick="scanSelected(true)">Scan (live)</button>
     <select id="filter" onchange="loadSignals()">
       <option value="">all signals</option>
       <option value="detected">detected</option>
@@ -105,6 +124,7 @@ async function place(id){
   alert((r.dry_run?'[DRY-RUN] ':'')+r.message+(r.placed_odds?(' @ '+r.placed_odds):'')); loadAll();
 }
 async function scan(sport, live){ const r = await j('/scan?sport='+sport+'&live='+live, {method:'POST'}); alert('New signals: '+r.new_signals); loadAll(); }
+function scanSelected(live){ const s = document.getElementById('sport-select').value; scan(s, live); }
 async function loadAll(){ await loadHealth(); await loadPnl(); await loadSignals(); }
 loadAll();
 setInterval(loadPnl, 15000);

@@ -35,9 +35,9 @@ _LOGIN_URL = "https://www.stoiximan.gr/"
 SELECTORS = {
     "accept_cookies": "#onetrust-accept-btn-handler",
     "login_button": "[data-qa='header-login-button']",
-    "username": "input[name='username']",
-    "password": "input[name='password']",
-    "submit_login": "[data-qa='login-submit']",
+    "username": "#username, input[name='username']",
+    "password": "#password, input[name='password']",
+    "submit_login": "[data-qa='login-submit'], button[type='submit']",
     "bet_slip_stake": "[data-qa='betslip-stake-input']",
     "bet_slip_odds": "[data-qa='betslip-odds']",
     "place_bet": "[data-qa='betslip-place-bet']",

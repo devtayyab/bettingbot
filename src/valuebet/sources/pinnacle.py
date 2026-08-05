@@ -22,7 +22,25 @@ log = get_logger("source.pinnacle")
 
 _BASE = "https://api.pinnacle.com"
 # Pinnacle sport ids.
-_SPORT_ID = {Sport.SOCCER: 29, Sport.TENNIS: 33, Sport.BASKETBALL: 4}
+_SPORT_ID = {
+    Sport.SOCCER: 29,
+    Sport.TENNIS: 33,
+    Sport.BASKETBALL: 4,
+    Sport.AMERICAN_FOOTBALL: 15,
+    Sport.BASEBALL: 3,
+    Sport.ICE_HOCKEY: 19,
+    Sport.CRICKET: 9,
+    Sport.RUGBY_LEAGUE: 27,
+    Sport.RUGBY_UNION: 28,
+    Sport.GOLF: 14,
+    Sport.MMA: 22,
+    Sport.BOXING: 6,
+    Sport.VOLLEYBALL: 34,
+    Sport.HANDBALL: 18,
+    Sport.DARTS: 11,
+    Sport.ESPORTS: 12,
+    Sport.TABLE_TENNIS: 32,
+}
 
 
 class PinnacleSource:
@@ -35,7 +53,10 @@ class PinnacleSource:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
     def fetch_markets(self, sport: Sport, live: bool = False) -> list[MarketSnapshot]:
-        sport_id = _SPORT_ID[sport]
+        sport_id = _SPORT_ID.get(sport)
+        if sport_id is None:
+            log.warning("unsupported_pinnacle_sport", sport=sport.value)
+            return []
         # 1) Pull fixtures, 2) pull odds, 3) join on event id.
         fixtures = self._client.get(
             "/v1/fixtures", params={"sportId": sport_id, "isLive": int(live)}

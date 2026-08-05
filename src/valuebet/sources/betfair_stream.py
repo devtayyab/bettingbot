@@ -9,21 +9,44 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from betfairlightweight.resources.streamingresources import MarketBookCache
+try:
+    from betfairlightweight.resources.streamingresources import MarketBookCache
+except ImportError:
+    MarketBookCache = Any  # type: ignore
 
 from ..core.models import MarketSnapshot, MarketStatus, Quote, Sport
 from ..logging import get_logger
-from .betfair import BetfairSource, _EVENT_TYPE
+from .base import OddsSource
 
 log = get_logger("source.betfair_stream")
+
+_EVENT_TYPE = {
+    Sport.SOCCER: "1",
+    Sport.TENNIS: "2",
+    Sport.GOLF: "3",
+    Sport.CRICKET: "4",
+    Sport.RUGBY_UNION: "5",
+    Sport.BOXING: "6",
+    Sport.AMERICAN_FOOTBALL: "6423",
+    Sport.BASEBALL: "7511",
+    Sport.BASKETBALL: "7522",
+    Sport.ICE_HOCKEY: "7524",
+    Sport.RUGBY_LEAGUE: "1477",
+    Sport.MMA: "26420387",
+    Sport.VOLLEYBALL: "998917",
+    Sport.HANDBALL: "468328",
+    Sport.DARTS: "3503",
+    Sport.ESPORTS: "27454571",
+    Sport.TABLE_TENNIS: "2593174",
+}
 
 
 class BetfairStreamSource:
     name = "betfair_stream"
 
-    def __init__(self, fallback_source: BetfairSource) -> None:
+    def __init__(self, fallback_source: OddsSource) -> None:
         self.fallback = fallback_source
         self._client = None
         self._stream = None
@@ -48,7 +71,7 @@ class BetfairStreamSource:
 
         from betfairlightweight import filters
 
-        event_type_id = _EVENT_TYPE[sport]
+        event_type_id = _EVENT_TYPE.get(sport, "1")
         market_filter = filters.streaming_market_filter(
             event_type_ids=[event_type_id],
             market_types=["MATCH_ODDS"],

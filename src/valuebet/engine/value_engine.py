@@ -174,12 +174,17 @@ class ValueEngine:
             if e < required_edge:
                 continue
 
-            # Latency protection for live markets
-            if is_live:
-                latency = (now - tq.captured_at).total_seconds()
-                if latency > s.max_live_latency_seconds:
-                    log.info("stale_odds_rejected", selection=tq.selection, latency=latency)
-                    continue
+            # Latency protection (stale odds rejection for both live and prematch)
+            latency = (now - tq.captured_at).total_seconds()
+            max_allowed_latency = sport_cfg["max_live_latency_seconds"] if is_live else sport_cfg["max_prematch_latency_seconds"]
+            if latency > max_allowed_latency:
+                log.info("stale_odds_rejected", selection=tq.selection, latency=latency, max_allowed=max_allowed_latency, live=is_live)
+                continue
+
+            # Target quote liquidity check
+            if tq.back_liquidity is not None and tq.back_liquidity < min_liquidity:
+                log.info("health_rejected", reason="target_low_liquidity", selection=tq.selection, liquidity=tq.back_liquidity)
+                continue
 
             # 5. Sharp confirmation (Pinnacle agrees with Betfair).
             confirm_prob = conf_fair_by_key.get(key)
@@ -200,8 +205,12 @@ class ValueEngine:
 
             # 6. Size it.
             # Feature 6: Event exposure cap (Correlated Bets)
-            with session_scope() as session:
-                current_exposure = get_event_exposure(session, _safe_event_id(target.event_id))
+            try:
+                with session_scope() as session:
+                    current_exposure = get_event_exposure(session, _safe_event_id(target.event_id))
+            except Exception:
+                current_exposure = 0.0
+
             if current_exposure >= s.max_event_exposure:
                 log.info("event_exposure_cap_reached", event_id=target.event_id, current=current_exposure)
                 return []  # Cap reached, skip all further selections for this event

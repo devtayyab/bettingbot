@@ -11,6 +11,20 @@ class Sport(str, Enum):
     SOCCER = "soccer"
     TENNIS = "tennis"
     BASKETBALL = "basketball"
+    AMERICAN_FOOTBALL = "american_football"
+    BASEBALL = "baseball"
+    ICE_HOCKEY = "ice_hockey"
+    CRICKET = "cricket"
+    RUGBY_LEAGUE = "rugby_league"
+    RUGBY_UNION = "rugby_union"
+    GOLF = "golf"
+    MMA = "mma"
+    BOXING = "boxing"
+    VOLLEYBALL = "volleyball"
+    HANDBALL = "handball"
+    DARTS = "darts"
+    ESPORTS = "esports"
+    TABLE_TENNIS = "table_tennis"
 
 
 class MarketStatus(str, Enum):

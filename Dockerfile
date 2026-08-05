@@ -15,9 +15,9 @@ COPY migrations ./migrations
 COPY src ./src
 RUN pip install --no-cache-dir -e ".[dev]"
 
-# Install Playwright browser only in images that need it (placement worker)
-ARG INSTALL_BROWSERS=false
-RUN if [ "$INSTALL_BROWSERS" = "true" ]; then playwright install --with-deps chromium; fi
+# Install Playwright browser and OS dependencies into the image
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium
 
 EXPOSE 8000
 CMD ["uvicorn", "valuebet.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

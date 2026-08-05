@@ -86,6 +86,8 @@ def approve_signal(signal_id: int) -> dict:
         sig = session.get(Signal, signal_id)
         if not sig:
             raise HTTPException(404, "signal not found")
+        if sig.status == "approved":
+            return {"id": signal_id, "status": "approved"}
         if sig.status != "detected":
             raise HTTPException(409, f"signal is '{sig.status}', cannot approve")
         sig.status = "approved"
@@ -122,7 +124,8 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
         min_odds = round(sig.target_odds * (1 - body.slippage), 2)
         request = PlacementRequest(
             event_id=str(sig.event_id), market_type=sig.market_type,
-            selection=sig.selection, stake=sig.recommended_stake, min_odds=min_odds,
+            selection=sig.selection, target_odds=sig.target_odds,
+            stake=sig.recommended_stake, min_odds=min_odds,
         )
         # Lazy import keeps Playwright optional for non-placement deployments.
         from ..placement.stoiximan import StoiximanPlacer
