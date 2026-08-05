@@ -20,7 +20,7 @@ from ..engine.executor import Executor
 
 log = get_logger("scheduler")
 
-SPORTS = [Sport.SOCCER, Sport.TENNIS, Sport.BASKETBALL]
+SPORTS = list(Sport)
 
 
 def _scan_prematch() -> None:

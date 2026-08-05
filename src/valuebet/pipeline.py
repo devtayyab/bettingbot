@@ -33,13 +33,21 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
     if have_odds_api:
         log.info("using_the_odds_api_source")
         from .sources.the_odds_api import TheOddsAPISource
-        from .sources.stoiximan import StoiximanSource
-        from .sources.betfair_stream import BetfairStreamSource
 
-        bf = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
-        pin = TheOddsAPISource(target_bookmaker="pinnacle", name="pinnacle")
-        targets = [StoiximanSource(headless=True)]
-        return bf, pin, targets, BetfairStreamSource(bf)
+        bf  = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
+        pin = TheOddsAPISource(target_bookmaker="pinnacle",      name="pinnacle")
+        # Betano = Stoiximan (same Kaizen Gaming platform, same odds feed).
+        # We use Betano via The Odds API as the target bookmaker to scan for value.
+        # When a signal is found, placement still hits the real Stoiximan account.
+        tgt = TheOddsAPISource(target_bookmaker="betano_uk",        name="stoiximan")
+
+        try:
+            from .sources.betfair_stream import BetfairStreamSource
+            stream = BetfairStreamSource(bf)
+        except Exception:
+            stream = bf  # fallback: use plain API source as stream
+
+        return bf, pin, [tgt], stream
 
     if not (have_betfair and have_pinnacle):
         log.warning("using_mock_sources", reason="missing Betfair/Pinnacle credentials")

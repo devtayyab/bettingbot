@@ -53,6 +53,9 @@ def demo_sources() -> tuple[MockSource, MockSource, MockSource]:
         {
             "1.111": [("Team A", 1.66), ("Draw", 4.2), ("Team B", 6.0)],
             "1.222": [("Team C", 2.10), ("Draw", 3.4), ("Team D", 3.6)],
+            "1.333": [("Real Madrid", 1.50), ("Draw", 4.5), ("Getafe", 8.0)],
+            "1.444": [("Bayern", 1.30), ("Draw", 5.0), ("Bochum", 12.0)],
+            "1.555": [("PSG", 1.80), ("Draw", 3.8), ("Dortmund", 4.2)],
         },
     )
     pinnacle = MockSource(
@@ -60,14 +63,20 @@ def demo_sources() -> tuple[MockSource, MockSource, MockSource]:
         {
             "1.111": [("Team A", 1.68), ("Draw", 4.1), ("Team B", 5.9)],
             "1.222": [("Team C", 2.12), ("Draw", 3.4), ("Team D", 3.55)],
+            "1.333": [("Real Madrid", 1.52), ("Draw", 4.4), ("Getafe", 7.8)],
+            "1.444": [("Bayern", 1.32), ("Draw", 4.9), ("Bochum", 11.5)],
+            "1.555": [("PSG", 1.82), ("Draw", 3.7), ("Dortmund", 4.1)],
         },
     )
-    # Stoiximan offers a generous price on the Team A favorite -> positive edge.
+    # Stoiximan offers a generous price on the favorites -> positive edge.
     stoiximan = MockSource(
         "stoiximan",
         {
             "1.111": [("Team A", 1.80), ("Draw", 4.0), ("Team B", 5.5)],
             "1.222": [("Team C", 2.05), ("Draw", 3.3), ("Team D", 3.5)],
+            "1.333": [("Real Madrid", 1.70), ("Draw", 4.2), ("Getafe", 7.5)],  # Big edge
+            "1.444": [("Bayern", 1.45), ("Draw", 4.8), ("Bochum", 10.0)],      # Edge
+            "1.555": [("PSG", 2.00), ("Draw", 3.6), ("Dortmund", 4.0)],        # Edge
         },
     )
     return betfair, pinnacle, stoiximan

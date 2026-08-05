@@ -26,14 +26,19 @@ services:
       retries: 10
 
   api:
-    build: .
-    command: uvicorn valuebet.api.main:app --host 0.0.0.0 --port 8000
+    build:
+      context: .
+      args:
+        INSTALL_BROWSERS: "true"
+    command: uvicorn valuebet.api.main:app --host 0.0.0.0 --port 8000 --reload
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://valuebet:valuebet@db:5432/valuebet
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -48,6 +53,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://valuebet:valuebet@db:5432/valuebet
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }

@@ -21,8 +21,22 @@ _BASE = "https://api.the-odds-api.com/v4"
 # Map our Sport enum to The Odds API sport keys
 _SPORT_KEYS = {
     Sport.SOCCER: ["soccer_epl", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_italy_serie_a", "soccer_uefa_champs_league"],
-    Sport.TENNIS: ["tennis_atp_wimbledon", "tennis_wta_wimbledon"],
-    Sport.BASKETBALL: ["basketball_nba", "basketball_euroleague"],
+    Sport.TENNIS: ["tennis_atp_wimbledon", "tennis_wta_wimbledon", "tennis_atp_us_open", "tennis_wta_us_open"],
+    Sport.BASKETBALL: ["basketball_nba", "basketball_euroleague", "basketball_ncaab"],
+    Sport.AMERICAN_FOOTBALL: ["americanfootball_nfl", "americanfootball_ncaaf"],
+    Sport.BASEBALL: ["baseball_mlb"],
+    Sport.ICE_HOCKEY: ["icehockey_nhl"],
+    Sport.CRICKET: ["cricket_ipl", "cricket_big_bash"],
+    Sport.RUGBY_LEAGUE: ["rugbyleague_nrl"],
+    Sport.RUGBY_UNION: ["rugbyunion_six_nations"],
+    Sport.GOLF: ["golf_pga_championship"],
+    Sport.MMA: ["mma_mixed_martial_arts"],
+    Sport.BOXING: ["boxing_boxing"],
+    Sport.VOLLEYBALL: ["volleyball_indoor"],
+    Sport.HANDBALL: ["handball_champions_league"],
+    Sport.DARTS: ["darts_pdc_world_championship"],
+    Sport.ESPORTS: ["csgo_esl", "dota2_international"],
+    Sport.TABLE_TENNIS: ["table_tennis"],
 }
 
 
