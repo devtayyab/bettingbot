@@ -33,16 +33,16 @@ _LOGIN_URL = "https://www.stoiximan.gr/"
 
 # TODO: confirm against the live site before going off dry-run.
 SELECTORS = {
-    "accept_cookies": "#onetrust-accept-btn-handler",
-    "login_button": "[data-qa='header-login-button']",
-    "username": "#username, input[name='username']",
-    "password": "#password, input[name='password']",
-    "submit_login": "[data-qa='login-submit'], button[type='submit']",
-    "bet_slip_stake": "[data-qa='betslip-stake-input']",
-    "bet_slip_odds": "[data-qa='betslip-odds']",
-    "place_bet": "[data-qa='betslip-place-bet']",
+    "accept_cookies": "#onetrust-accept-btn-handler, button:has-text('Accept'), button:has-text('Αποδοχή')",
+    "login_button": "[data-qa='header-login-button'], button:has-text('ΕΊΣΟΔΟΣ'), button:has-text('LOGIN'), a[href*='login'], .header__login-button",
+    "username": "#username, input[name='username'], input[name='email'], input[type='email'], input[data-qa='username-input']",
+    "password": "#password, input[name='password'], input[type='password'], input[data-qa='password-input']",
+    "submit_login": "[data-qa='login-submit'], button[type='submit'], button:has-text('ΕΊΣΟΔΟΣ'), button:has-text('LOGIN')",
+    "bet_slip_stake": "[data-qa='betslip-stake-input'], input[name='stake'], .betslip-stake-input input",
+    "bet_slip_odds": "[data-qa='betslip-odds'], .betslip-odds",
+    "place_bet": "[data-qa='betslip-place-bet'], button:has-text('PLACE BET'), button:has-text('STAKE')",
     # Feature 3: receipt selectors — read accepted stake back from confirmation
-    "bet_confirmation": "[data-qa='bet-receipt']",
+    "bet_confirmation": "[data-qa='bet-receipt'], .bet-receipt",
     "receipt_stake": "[data-qa='receipt-stake']",    # Accepted stake amount
     "receipt_odds": "[data-qa='receipt-odds']",      # Confirmed odds
 }
