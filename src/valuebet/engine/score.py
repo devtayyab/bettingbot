@@ -190,36 +190,35 @@ class PlaywrightScoreReader:
     def _scrape(self, event_id: str) -> Optional[EventState]:
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError:
-            log.error("playwright_not_installed")
+            url = f"https://www.stoiximan.gr/live/?event_id={event_id}"
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=self.headless)
+                page = browser.new_page()
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=5_000)
+                    s = self.SCORE_SELECTORS
+
+                    home_score = _safe_int(page.text_content(s["home_score"]))
+                    away_score = _safe_int(page.text_content(s["away_score"]))
+                    period_text = (page.text_content(s["period"]) or "").strip()
+                    clock_text = (page.text_content(s["clock"]) or "").strip()
+                    clock_seconds = _parse_clock(clock_text)
+                    suspended = page.locator(s["is_suspended"]).count() > 0
+
+                    state = EventState(
+                        home_score=home_score,
+                        away_score=away_score,
+                        period=_normalise_period(period_text),
+                        clock_seconds=clock_seconds,
+                        is_suspended=suspended,
+                    )
+                    self._state_cache[event_id] = state
+                    return state
+                finally:
+                    browser.close()
+        except Exception as exc:
+            log.warning("playwright_score_scrape_bypassed", event_id=event_id, error=str(exc))
             return None
-
-        url = f"https://www.stoiximan.gr/live/?event_id={event_id}"
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            page = browser.new_page()
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=10_000)
-                s = self.SCORE_SELECTORS
-
-                home_score = _safe_int(page.text_content(s["home_score"]))
-                away_score = _safe_int(page.text_content(s["away_score"]))
-                period_text = (page.text_content(s["period"]) or "").strip()
-                clock_text = (page.text_content(s["clock"]) or "").strip()
-                clock_seconds = _parse_clock(clock_text)
-                suspended = page.locator(s["is_suspended"]).count() > 0
-
-                state = EventState(
-                    home_score=home_score,
-                    away_score=away_score,
-                    period=_normalise_period(period_text),
-                    clock_seconds=clock_seconds,
-                    is_suspended=suspended,
-                )
-                self._state_cache[event_id] = state
-                return state
-            finally:
-                browser.close()
 
 
 # ---------------------------------------------------------------------------
