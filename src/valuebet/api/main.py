@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from ..config import get_settings
@@ -56,6 +56,11 @@ def _to_out(s: Signal) -> SignalOut:
         target_odds=s.target_odds, edge=s.edge, recommended_stake=s.recommended_stake,
         status=s.status,
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 @app.get("/health")
