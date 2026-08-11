@@ -153,13 +153,20 @@ class StoiximanPlacer:
     # --- page steps (selectors must be validated against the live site) ---
 
     def _login(self, page) -> None:
-        page.goto(_LOGIN_URL, wait_until="domcontentloaded")
-        self._maybe_click(page, SELECTORS["accept_cookies"])
-        self._maybe_click(page, SELECTORS["login_button"])
-        page.fill(SELECTORS["username"], self.settings.stoiximan_username)
-        page.fill(SELECTORS["password"], self.settings.stoiximan_password)
-        page.click(SELECTORS["submit_login"])
-        page.wait_for_load_state("networkidle")
+        try:
+            page.goto(_LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
+            self._maybe_click(page, SELECTORS["accept_cookies"])
+            if not self._maybe_click(page, SELECTORS["login_button"]):
+                page.goto("https://www.stoiximan.gr/?login=1", wait_until="domcontentloaded", timeout=10000)
+
+            page.wait_for_selector(SELECTORS["username"], timeout=5000)
+            page.fill(SELECTORS["username"], self.settings.stoiximan_username)
+            page.fill(SELECTORS["password"], self.settings.stoiximan_password)
+            page.click(SELECTORS["submit_login"], timeout=5000)
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception as exc:
+            log.warning("stoiximan_login_form_not_found_or_timeout", error=str(exc))
+            raise RuntimeError("Stoiximan login form could not be opened/filled") from exc
 
     def _navigate_to_selection(self, page, request: PlacementRequest) -> None:
         try:
@@ -249,8 +256,9 @@ class StoiximanPlacer:
             )
 
     @staticmethod
-    def _maybe_click(page, selector: str) -> None:
+    def _maybe_click(page, selector: str) -> bool:
         try:
             page.click(selector, timeout=3000)
+            return True
         except Exception:
-            pass
+            return False
