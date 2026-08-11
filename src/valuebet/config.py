@@ -101,6 +101,5 @@ class Settings(BaseSettings):
     placement_require_approval: bool = True
 
 
-@lru_cache
 def get_settings() -> Settings:
     return Settings()
