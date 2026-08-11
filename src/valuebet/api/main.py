@@ -70,13 +70,34 @@ def health() -> dict:
 
 
 @app.post("/scan")
-def trigger_scan(sport: str = "soccer", live: bool = False) -> dict:
+def trigger_scan(sport: str = "all", live: bool = False) -> dict:
     try:
-        sport_enum = Sport(sport)
-    except ValueError as exc:
-        raise HTTPException(400, f"unknown sport: {sport}") from exc
-    count = run_scan(sport_enum, live=live)
-    return {"new_signals": count}
+        if sport == "all":
+            total = 0
+            for sp in Sport:
+                try:
+                    total += run_scan(sp, live=live)
+                except Exception as e:
+                    log.warning("scan_failed_for_sport", sport=sp.value, error=str(e))
+            return {"new_signals": total}
+
+        try:
+            sport_enum = Sport(sport)
+        except ValueError:
+            # If an unknown sport key is passed, fallback to scanning all sports
+            total = 0
+            for sp in Sport:
+                try:
+                    total += run_scan(sp, live=live)
+                except Exception as e:
+                    log.warning("scan_failed_for_sport", sport=sp.value, error=str(e))
+            return {"new_signals": total}
+
+        count = run_scan(sport_enum, live=live)
+        return {"new_signals": count}
+    except Exception as exc:
+        log.error("scan_endpoint_failed", sport=sport, live=live, error=str(exc))
+        return {"new_signals": 0, "error": str(exc)}
 
 
 @app.get("/signals", response_model=list[SignalOut])

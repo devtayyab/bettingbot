@@ -43,6 +43,7 @@ DASHBOARD_HTML = """
 
   <div class="bar">
     <select id="sport-select">
+      <option value="all">all sports</option>
       <option value="soccer">soccer</option>
       <option value="tennis">tennis</option>
       <option value="basketball">basketball</option>
