@@ -22,6 +22,10 @@ against the live site and the SELECTORS map updated. Everything else is real.
 
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
+
 from ..config import get_settings
 from ..core.limit_tracker import LimitEvent, get_limit_tracker
 from ..logging import get_logger
@@ -71,9 +75,34 @@ class StoiximanPlacer:
             return result
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context()
+            # Anti-detection: launch args that make headless look like real Chrome
+            browser = p.chromium.launch(
+                headless=self.headless,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-infobars",
+                    "--start-maximized",
+                ]
+            )
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1366, "height": 768},
+                locale="el-GR",
+                timezone_id="Europe/Athens",
+                java_script_enabled=True,
+            )
+            # Load saved cookies if they exist (avoids re-login)
+            self._load_cookies(context)
             page = context.new_page()
+            # Mask webdriver property so DataDome doesn't detect headless
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             try:
                 self._login(page)
                 self._navigate_to_selection(page, request)
@@ -152,20 +181,77 @@ class StoiximanPlacer:
 
     # --- page steps (selectors must be validated against the live site) ---
 
-    def _login(self, page) -> None:
+    # ------------------------------------------------------------------ cookies
+    _COOKIE_FILE = Path("/tmp/stoiximan_cookies.json")
+
+    def _load_cookies(self, context) -> bool:
+        """Load saved cookies into browser context. Returns True if loaded."""
+        if self._COOKIE_FILE.exists():
+            try:
+                cookies = json.loads(self._COOKIE_FILE.read_text())
+                context.add_cookies(cookies)
+                log.info("cookies_loaded", count=len(cookies))
+                return True
+            except Exception as e:
+                log.warning("cookie_load_failed", error=str(e))
+        return False
+
+    def _save_cookies(self, context) -> None:
+        """Save browser cookies to file for reuse in future sessions."""
+        try:
+            cookies = context.cookies()
+            self._COOKIE_FILE.write_text(json.dumps(cookies))
+            log.info("cookies_saved", count=len(cookies))
+        except Exception as e:
+            log.warning("cookie_save_failed", error=str(e))
+
+    def _is_logged_in(self, page) -> bool:
+        """Check if we are already logged in (cookies still valid)."""
         try:
             page.goto(_LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
+            time.sleep(2)  # Let JS render
+            # If login button is visible → not logged in
+            login_btn = page.query_selector(SELECTORS["login_button"])
+            if login_btn and login_btn.is_visible():
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _login(self, page) -> None:
+        """Login only if not already logged in via saved cookies."""
+        try:
+            # Check if saved cookies are still valid
+            if self._is_logged_in(page):
+                log.info("session_reused", msg="already logged in via cookies")
+                return
+
+            log.info("login_required", msg="cookies invalid or missing, logging in")
+            # Human-like delay before interacting
+            time.sleep(1)
             self._maybe_click(page, SELECTORS["accept_cookies"])
+            time.sleep(0.5)
+
             if not self._maybe_click(page, SELECTORS["login_button"]):
                 page.goto("https://www.stoiximan.com.cy/?login=1", wait_until="domcontentloaded", timeout=10000)
+                time.sleep(1)
 
-            page.wait_for_selector(SELECTORS["username"], timeout=5000)
-            page.fill(SELECTORS["username"], self.settings.stoiximan_username)
-            page.fill(SELECTORS["password"], self.settings.stoiximan_password)
+            page.wait_for_selector(SELECTORS["username"], timeout=8000)
+            # Type slowly like a human
+            page.type(SELECTORS["username"], self.settings.stoiximan_username, delay=80)
+            time.sleep(0.3)
+            page.type(SELECTORS["password"], self.settings.stoiximan_password, delay=80)
+            time.sleep(0.5)
             page.click(SELECTORS["submit_login"], timeout=5000)
-            page.wait_for_load_state("networkidle", timeout=10000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+            time.sleep(2)
+
+            # Save cookies so next run skips login entirely
+            self._save_cookies(page.context)
+            log.info("login_successful", msg="cookies saved for future reuse")
+
         except Exception as exc:
-            log.warning("stoiximan_login_form_not_found_or_timeout", error=str(exc))
+            log.warning("stoiximan_login_failed", error=str(exc))
             raise RuntimeError("Stoiximan login form could not be opened/filled") from exc
 
     def _navigate_to_selection(self, page, request: PlacementRequest) -> None:
