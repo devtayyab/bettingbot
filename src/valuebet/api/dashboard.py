@@ -91,6 +91,24 @@ DASHBOARD_HTML = """
   </div>
   <div id="status-bar" style="font-size:12px; color:#8a93a6; margin-bottom:12px;">Ready.</div>
 
+  <!-- Stoiximan Session Panel -->
+  <div id="session-panel" style="background:#161a22; border:1px solid #232836; border-radius:10px; padding:16px 20px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+      <strong style="font-size:14px;">🔐 Stoiximan Session</strong>
+      <span id="cookie-status-badge" class="pill">checking…</span>
+      <button class="toolbtn" onclick="clearCookies()" style="margin-left:auto; font-size:12px;">🗑 Clear Session</button>
+    </div>
+    <div id="cookie-import-area">
+      <p style="font-size:12px; color:#8a93a6; margin:0 0 8px 0;">
+        Agar bot login nahi kar pata toh yahan apne browser ke cookies paste karo:<br>
+        <b>Chrome → stoiximan.com.cy par login karo → Cookie-Editor extension → Export as JSON → yahan paste karo</b>
+      </p>
+      <textarea id="cookie-input" rows="3" placeholder='[{"name":"session","value":"abc...","domain":".stoiximan.com.cy",...}]'
+        style="width:100%; box-sizing:border-box; background:#0f1115; color:#e6e6e6; border:1px solid #232836; border-radius:6px; padding:8px; font-size:12px; font-family:monospace; resize:vertical;"></textarea>
+      <button id="btn-import" class="toolbtn" onclick="importCookies()" style="margin-top:8px; background:#2b5cb8; color:#fff;">⬆ Import Cookies</button>
+    </div>
+  </div>
+
   <table>
     <thead><tr>
       <th>Selection</th><th>Sport</th><th>Fair p</th><th>Pinnacle p</th>
@@ -199,9 +217,48 @@ async function scan(sport, live){
 
 function scanSelected(live){ const s = document.getElementById('sport-select').value; scan(s, live); }
 
+async function loadCookieStatus(){
+  try {
+    const r = await api('/cookie-status');
+    const badge = document.getElementById('cookie-status-badge');
+    if(r.has_cookies){
+      badge.style.background='#1a4a2a'; badge.style.color='#4ade80';
+      badge.textContent = `✅ ${r.cookie_count} cookies · ${r.age_hours}h ago`;
+    } else {
+      badge.style.background='#5a3a12'; badge.style.color='#ffce8a';
+      badge.textContent = '⚠ No session — import cookies below';
+    }
+  } catch(e){}
+}
+
+async function importCookies(){
+  const raw = document.getElementById('cookie-input').value.trim();
+  if(!raw){ toast('Paste cookies JSON first!', 'err'); return; }
+  let cookies;
+  try { cookies = JSON.parse(raw); } catch(e){ toast('Invalid JSON! Copy-paste again from Cookie-Editor.', 'err', 8000); return; }
+  if(!Array.isArray(cookies)){ toast('Must be a JSON array [ ... ]', 'err'); return; }
+  setBtn('btn-import', true, '⬆ Import Cookies');
+  try {
+    const r = await api('/import-cookies', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({cookies})});
+    toast(r.message, 'ok', 8000);
+    document.getElementById('cookie-input').value = '';
+    loadCookieStatus();
+  } catch(e){}
+  finally { setBtn('btn-import', false, '⬆ Import Cookies'); }
+}
+
+async function clearCookies(){
+  if(!confirm('Session cookies delete kar dein? Bot ko dobara login karna padega.')) return;
+  try {
+    const r = await api('/import-cookies', {method:'DELETE'});
+    toast(r.message, 'inf');
+    loadCookieStatus();
+  } catch(e){}
+}
+
 async function loadAll(){
   setBtn('btn-refresh', true, '↻ Refresh');
-  try { await Promise.all([loadHealth(), loadPnl(), loadSignals()]); setStatus('Last updated: '+new Date().toLocaleTimeString()); }
+  try { await Promise.all([loadHealth(), loadPnl(), loadSignals(), loadCookieStatus()]); setStatus('Last updated: '+new Date().toLocaleTimeString()); }
   catch(e){ setStatus('Refresh failed.'); }
   finally { setBtn('btn-refresh', false, '↻ Refresh'); }
 }
