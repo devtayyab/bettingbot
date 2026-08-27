@@ -33,11 +33,11 @@ _LOGIN_URL = "https://www.stoiximan.gr/"
 
 # TODO: confirm against the live site before going off dry-run.
 SELECTORS = {
-    "accept_cookies": "#onetrust-accept-btn-handler, button:has-text('Accept'), button:has-text('Αποδοχή')",
-    "login_button": "[data-qa='header-login-button'], button:has-text('ΕΊΣΟΔΟΣ'), button:has-text('LOGIN'), a[href*='login'], .header__login-button",
-    "username": "#username, input[name='username'], input[name='email'], input[type='email'], input[data-qa='username-input']",
-    "password": "#password, input[name='password'], input[type='password'], input[data-qa='password-input']",
-    "submit_login": "[data-qa='login-submit'], button[type='submit'], button:has-text('ΕΊΣΟΔΟΣ'), button:has-text('LOGIN')",
+    "accept_cookies": "#js-accept-btn, button[data-isterms='true'], #onetrust-accept-btn-handler, button:has-text('Accept'), button:has-text('Αποδοχή')",
+    "login_button": "[data-qa='login-button'], button:has-text('ΣΥΝΔΕΣΗ')",
+    "username": "#username, input[name='username'], form[data-qa='login'] input[name='username']",
+    "password": "#password, input[name='Password'], input[name='password'], form[data-qa='login'] input[type='password']",
+    "submit_login": "form[data-qa='login'] button[data-qa='submit'], [data-qa='submit'], button[type='submit']",
     "bet_slip_stake": "[data-qa='betslip-stake-input'], input[name='stake'], .betslip-stake-input input",
     "bet_slip_odds": "[data-qa='betslip-odds'], .betslip-odds",
     "place_bet": "[data-qa='betslip-place-bet'], button:has-text('PLACE BET'), button:has-text('STAKE')",

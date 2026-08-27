@@ -53,7 +53,7 @@ class Executor:
                 available_exposure = s.max_event_exposure - current_exposure
                 
                 if available_exposure <= 0:
-                    log.info("execution_skipped_exposure", selection=sig.selection, event=sig.event_id, exposure=current_exposure)
+                    log.info("execution_skipped_exposure", selection=sig.selection, event_id=sig.event_id, exposure=current_exposure)
                     sig.status = "rejected"
                     continue
                 
@@ -79,13 +79,14 @@ class Executor:
                 )
                 
                 # 3. Execute via Router
-                placer = self.router.get_placer(sig.target_bookmaker)
+                bookmaker_name = getattr(sig, "target_bookmaker", "stoiximan")
+                placer = self.router.get_placer(bookmaker_name)
                 if not placer:
-                    log.error("no_placer_configured", bookmaker=sig.target_bookmaker)
+                    log.error("no_placer_configured", bookmaker=bookmaker_name)
                     sig.status = "rejected"
                     continue
                     
-                log.info("attempting_placement", selection=sig.selection, stake=stake, bookmaker=sig.target_bookmaker)
+                log.info("attempting_placement", selection=sig.selection, stake=stake, bookmaker=bookmaker_name)
                 res = placer.place(req)
                 
                 # 4. Record Result
