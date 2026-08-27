@@ -29,7 +29,7 @@ from .base import PlacementRequest, PlacementResult
 
 log = get_logger("placement.stoiximan")
 
-_LOGIN_URL = "https://www.stoiximan.gr/"
+_LOGIN_URL = "https://www.stoiximan.com.cy/"
 
 # TODO: confirm against the live site before going off dry-run.
 SELECTORS = {
@@ -157,7 +157,7 @@ class StoiximanPlacer:
             page.goto(_LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
             self._maybe_click(page, SELECTORS["accept_cookies"])
             if not self._maybe_click(page, SELECTORS["login_button"]):
-                page.goto("https://www.stoiximan.gr/?login=1", wait_until="domcontentloaded", timeout=10000)
+                page.goto("https://www.stoiximan.com.cy/?login=1", wait_until="domcontentloaded", timeout=10000)
 
             page.wait_for_selector(SELECTORS["username"], timeout=5000)
             page.fill(SELECTORS["username"], self.settings.stoiximan_username)
