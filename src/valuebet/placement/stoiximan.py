@@ -55,17 +55,33 @@ BOOKMAKER_NAME = "stoiximan"
 
 
 class StoiximanPlacer:
+    """Persistent-session Stoiximan placer.
+
+    The browser is launched once and the login is performed once.
+    Every subsequent call to ``place()`` reuses the same page —
+    no re-login on every bet.  The session is automatically refreshed
+    if it expires (e.g. after a long idle period).
+    """
+
     def __init__(self, headless: bool = True) -> None:
         self.settings = get_settings()
         self.headless = headless
+        # Persistent session state
+        self._pw = None          # playwright instance
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._logged_in = False
+
+    # ------------------------------------------------------------------ public
 
     def place(self, request: PlacementRequest) -> PlacementResult:
         dry_run = self.settings.placement_dry_run
         try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            msg = "playwright not installed; run `playwright install chromium`"
-            log.error("playwright_missing", selection=request.selection)
+            self._ensure_session()
+        except Exception as exc:
+            msg = f"session error: {exc}"
+            log.error("session_failed", error=msg)
             result = PlacementResult(
                 success=False, placed_odds=None,
                 requested_stake=request.stake, accepted_stake=0.0,
@@ -74,112 +90,158 @@ class StoiximanPlacer:
             self._record_limit_event(result, request)
             return result
 
-        with sync_playwright() as p:
-            # Anti-detection: launch args that make headless look like real Chrome
-            browser = p.chromium.launch(
-                headless=self.headless,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-extensions",
-                    "--disable-infobars",
-                    "--start-maximized",
-                ]
-            )
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/126.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1366, "height": 768},
-                locale="el-GR",
-                timezone_id="Europe/Athens",
-                java_script_enabled=True,
-            )
-            # Load saved cookies if they exist (avoids re-login)
-            self._load_cookies(context)
-            page = context.new_page()
-            # Mask webdriver property so DataDome doesn't detect headless
-            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            try:
-                self._login(page)
-                self._navigate_to_selection(page, request)
-                live_odds = self._read_live_odds(page)
+        page = self._page
+        try:
+            self._navigate_to_selection(page, request)
+            live_odds = self._read_live_odds(page)
 
-                if live_odds is None:
-                    result = PlacementResult(
-                        success=False, placed_odds=None,
-                        requested_stake=request.stake, accepted_stake=0.0,
-                        dry_run=dry_run, message="could not read live odds",
-                    )
-                    self._record_limit_event(result, request)
-                    return result
-
-                # Price protection: refuse if the edge has evaporated.
-                if live_odds < request.min_odds:
-                    msg = f"price moved: live {live_odds} < min {request.min_odds}; abandoning"
-                    log.info("placement_abandoned", reason=msg, selection=request.selection)
-                    result = PlacementResult(
-                        success=False, placed_odds=live_odds,
-                        requested_stake=request.stake, accepted_stake=0.0,
-                        dry_run=dry_run, message=msg,
-                    )
-                    self._record_limit_event(result, request)
-                    return result
-
-                self._fill_stake(page, request.stake)
-
-                if dry_run:
-                    msg = "DRY-RUN: slip prepared, place button NOT clicked"
-                    log.info("placement_dry_run", selection=request.selection,
-                             odds=live_odds, stake=request.stake)
-                    # In dry-run, assume full acceptance for simulation purposes
-                    return PlacementResult(
-                        success=True, placed_odds=live_odds,
-                        requested_stake=request.stake, accepted_stake=request.stake,
-                        dry_run=True, message=msg,
-                    )
-
-                self._click_place(page)
-                ok = self._confirm(page)
-
-                # Feature 3: read actual accepted stake from the receipt
-                accepted_stake = self._read_accepted_stake(page, request.stake)
-                receipt_odds = self._read_receipt_odds(page, live_odds)
-
-                msg = "bet placed" if ok else "place clicked but no receipt detected"
-                log.info("placement_result", selection=request.selection,
-                         ok=ok, requested_stake=request.stake,
-                         accepted_stake=accepted_stake, odds=receipt_odds)
-
-                result = PlacementResult(
-                    success=ok,
-                    placed_odds=receipt_odds,
-                    requested_stake=request.stake,
-                    accepted_stake=accepted_stake,
-                    dry_run=False,
-                    message=msg,
-                )
-                # Feature 4: record limit event for account health monitoring
-                self._record_limit_event(result, request)
-                return result
-
-            except Exception as exc:  # noqa: BLE001
-                log.error("placement_error", error=str(exc), selection=request.selection)
+            if live_odds is None:
                 result = PlacementResult(
                     success=False, placed_odds=None,
                     requested_stake=request.stake, accepted_stake=0.0,
-                    dry_run=dry_run, message=f"error: {exc}",
+                    dry_run=dry_run, message="could not read live odds",
                 )
                 self._record_limit_event(result, request)
                 return result
-            finally:
-                context.close()
-                browser.close()
 
-    # --- page steps (selectors must be validated against the live site) ---
+            # Price protection: refuse if the edge has evaporated.
+            if live_odds < request.min_odds:
+                msg = f"price moved: live {live_odds} < min {request.min_odds}; abandoning"
+                log.info("placement_abandoned", reason=msg, selection=request.selection)
+                result = PlacementResult(
+                    success=False, placed_odds=live_odds,
+                    requested_stake=request.stake, accepted_stake=0.0,
+                    dry_run=dry_run, message=msg,
+                )
+                self._record_limit_event(result, request)
+                return result
+
+            self._fill_stake(page, request.stake)
+
+            if dry_run:
+                msg = "DRY-RUN: slip prepared, place button NOT clicked"
+                log.info("placement_dry_run", selection=request.selection,
+                         odds=live_odds, stake=request.stake)
+                return PlacementResult(
+                    success=True, placed_odds=live_odds,
+                    requested_stake=request.stake, accepted_stake=request.stake,
+                    dry_run=True, message=msg,
+                )
+
+            self._click_place(page)
+            ok = self._confirm(page)
+
+            accepted_stake = self._read_accepted_stake(page, request.stake)
+            receipt_odds = self._read_receipt_odds(page, live_odds)
+
+            msg = "bet placed" if ok else "place clicked but no receipt detected"
+            log.info("placement_result", selection=request.selection,
+                     ok=ok, requested_stake=request.stake,
+                     accepted_stake=accepted_stake, odds=receipt_odds)
+
+            result = PlacementResult(
+                success=ok,
+                placed_odds=receipt_odds,
+                requested_stake=request.stake,
+                accepted_stake=accepted_stake,
+                dry_run=False,
+                message=msg,
+            )
+            self._record_limit_event(result, request)
+            return result
+
+        except Exception as exc:
+            log.error("placement_error", error=str(exc), selection=request.selection)
+            # If error looks like session expired, reset so next call re-logs in
+            if any(k in str(exc).lower() for k in ["timeout", "closed", "disconnected", "login"]):
+                log.warning("session_reset", reason="placement error, will re-login on next call")
+                self._logged_in = False
+            result = PlacementResult(
+                success=False, placed_odds=None,
+                requested_stake=request.stake, accepted_stake=0.0,
+                dry_run=dry_run, message=f"error: {exc}",
+            )
+            self._record_limit_event(result, request)
+            return result
+
+    def close(self) -> None:
+        """Cleanly shut down the persistent browser session."""
+        try:
+            if self._context:
+                self._context.close()
+            if self._browser:
+                self._browser.close()
+            if self._pw:
+                self._pw.stop()
+        except Exception:
+            pass
+        finally:
+            self._page = None
+            self._context = None
+            self._browser = None
+            self._pw = None
+            self._logged_in = False
+
+    # ------------------------------------------------------------------ session
+
+    def _ensure_session(self) -> None:
+        """Guarantee browser is open and user is logged in.
+        Called before every placement — cheap if already set up.
+        """
+        self._start_browser_if_needed()
+        if not self._logged_in:
+            self._login(self._page)
+            self._logged_in = True
+
+    def _start_browser_if_needed(self) -> None:
+        """Launch browser + context once; reuse on subsequent calls."""
+        if self._page is not None:
+            try:
+                # Quick check: page still alive?
+                self._page.title()
+                return
+            except Exception:
+                log.warning("browser_dead", msg="restarting browser session")
+                self.close()
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise RuntimeError("playwright not installed; run `playwright install chromium`")
+
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(
+            headless=self.headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--disable-infobars",
+                "--start-maximized",
+            ]
+        )
+        self._context = self._browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1366, "height": 768},
+            locale="el-GR",
+            timezone_id="Europe/Athens",
+            java_script_enabled=True,
+        )
+        # Load saved cookies if they exist (avoids re-login)
+        self._load_cookies(self._context)
+        self._page = self._context.new_page()
+        # Mask webdriver property so DataDome doesn't detect headless
+        self._page.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        log.info("browser_started", headless=self.headless)
+
+
 
     # ------------------------------------------------------------------ cookies
     _COOKIE_FILE = Path("/tmp/stoiximan_cookies.json")
