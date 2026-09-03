@@ -228,17 +228,26 @@ class StoiximanPlacer:
                 "--start-maximized",
             ]
         )
-        self._context = self._browser.new_context(
-            user_agent=(
+        context_kwargs = {
+            "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/126.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1366, "height": 768},
-            locale="el-GR",
-            timezone_id="Europe/Athens",
-            java_script_enabled=True,
-        )
+            "viewport": {"width": 1366, "height": 768},
+            "locale": "el-GR",
+            "timezone_id": "Europe/Athens",
+            "java_script_enabled": True,
+        }
+        if getattr(self.settings, "stoiximan_proxy", None):
+            proxy_dict = {"server": self.settings.stoiximan_proxy}
+            if getattr(self.settings, "stoiximan_proxy_username", None):
+                proxy_dict["username"] = self.settings.stoiximan_proxy_username
+                proxy_dict["password"] = self.settings.stoiximan_proxy_password
+            context_kwargs["proxy"] = proxy_dict
+            log.info("proxy_configured", server=self.settings.stoiximan_proxy)
+
+        self._context = self._browser.new_context(**context_kwargs)
         # Load saved cookies if they exist (avoids re-login)
         self._load_cookies(self._context)
         self._page = self._context.new_page()
