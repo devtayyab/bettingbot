@@ -265,6 +265,16 @@ class StoiximanPlacer:
             page.goto(_LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
             time.sleep(2)  # Let JS render
 
+            content = page.content().lower()
+            if "regulatory provisions" in content or "access denied" in content or "attention required" in content:
+                log.error("stoiximan_access_blocked", msg="Site blocked by location or Cloudflare on this server IP")
+                try:
+                    Path("data").mkdir(exist_ok=True)
+                    page.screenshot(path="data/stoiximan_blocked.png")
+                except Exception:
+                    pass
+                return False
+
             # If user balance or account menu is visible → logged in!
             logged_in_el = page.query_selector(SELECTORS["logged_in_indicator"])
             if logged_in_el and logged_in_el.is_visible():
@@ -275,8 +285,7 @@ class StoiximanPlacer:
             if login_btn and login_btn.is_visible():
                 return False
 
-            # Fallback heuristic: check if login modal/button is not present
-            return login_btn is None
+            return False
         except Exception:
             return False
 
@@ -318,14 +327,39 @@ class StoiximanPlacer:
 
     def _navigate_to_selection(self, page, request: PlacementRequest) -> None:
         try:
-            if not self._maybe_click(page, "[data-qa='header-icons-search-icon']"):
-                self._maybe_click(page, "[data-qa='search-icon']")
-            page.fill("input[type='search'], [data-qa='search-input'], input[placeholder*='Αναζήτηση'], input[placeholder*='Search']", request.selection)
-            page.click("[data-qa='search-result']:first-child, [data-qa*='search-result']:first-child", timeout=5000)
+            content = page.content().lower()
+            if "regulatory provisions" in content or "access denied" in content:
+                raise RuntimeError("Stoiximan is geo-blocked on this server IP (Access Denied)")
+
+            # Try clicking search icon button (check parent button/link if svg)
+            for sel in [
+                "button:has([data-qa='header-icons-search-icon'])",
+                "a:has([data-qa='header-icons-search-icon'])",
+                "[data-qa='header-icons-search-icon']",
+                "[data-qa='search-icon']",
+                "button[aria-label*='Search']",
+                "button[aria-label*='Αναζήτηση']",
+            ]:
+                if self._maybe_click(page, sel):
+                    break
+
+            time.sleep(1)
+            search_input_sel = "input[type='search'], [data-qa='search-input'], input[placeholder*='Search'], input[placeholder*='Αναζήτηση']"
+            page.wait_for_selector(search_input_sel, timeout=5000)
+            page.fill(search_input_sel, request.selection)
+            time.sleep(1)
+
+            result_sel = "[data-qa='search-result']:first-child, [data-qa*='search-result']:first-child, .search-result-item:first-child"
+            page.click(result_sel, timeout=5000)
             page.wait_for_load_state("networkidle")
             odds_str = str(request.target_odds).replace(".", ",")
             page.click(f"button:has-text('{odds_str}'), [data-qa='event-selection']:has-text('{odds_str}')", timeout=5000)
         except Exception as e:
+            try:
+                Path("data").mkdir(exist_ok=True)
+                page.screenshot(path="data/navigate_failed.png")
+            except Exception:
+                pass
             log.error("navigate_to_selection_failed", error=str(e),
                       selection=request.selection)
             raise RuntimeError(f"Failed to navigate to {request.selection}") from e
