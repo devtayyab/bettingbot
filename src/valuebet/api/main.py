@@ -299,6 +299,16 @@ def clear_cookies() -> dict:
     return {"success": True, "message": "No cookie file found to delete."}
 
 
+@app.get("/debug/screenshot")
+def debug_screenshot():
+    """View the latest diagnostic screenshot from Stoiximan browser automation."""
+    from fastapi.responses import FileResponse
+    for p in [Path("data/navigate_failed.png"), Path("data/stoiximan_blocked.png")]:
+        if p.exists():
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(404, "No screenshot available yet")
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     return DASHBOARD_HTML
