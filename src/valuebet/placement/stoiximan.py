@@ -30,23 +30,29 @@ from ..config import get_settings
 from ..core.limit_tracker import LimitEvent, get_limit_tracker
 from ..logging import get_logger
 from .base import PlacementRequest, PlacementResult
+from .session_store import (
+    get_cookie_file_path,
+    get_cookie_status,
+    load_cookies_into_context,
+    save_cookies_from_context,
+)
 
 log = get_logger("placement.stoiximan")
 
 _LOGIN_URL = "https://www.stoiximan.com.cy/"
 
-# TODO: confirm against the live site before going off dry-run.
 SELECTORS = {
     "accept_cookies": "#js-accept-btn, button[data-isterms='true'], #onetrust-accept-btn-handler, button:has-text('Accept'), button:has-text('Αποδοχή')",
-    "login_button": "[data-qa='login-button'], button:has-text('ΣΥΝΔΕΣΗ')",
+    "login_button": "[data-qa='login-button'], button:has-text('ΣΥΝΔΕΣΗ'), button:has-text('LOG IN'), button:has-text('Log In')",
+    "logged_in_indicator": "[data-qa='user-balance'], [data-qa='header-user-btn'], [data-qa='account-button'], .account-balance, button:has-text('Κατάθεση'), button:has-text('Deposit')",
     "username": "#username, input[name='username'], form[data-qa='login'] input[name='username']",
     "password": "#password, input[name='Password'], input[name='password'], form[data-qa='login'] input[type='password']",
     "submit_login": "form[data-qa='login'] button[data-qa='submit'], [data-qa='submit'], button[type='submit']",
-    "bet_slip_stake": "[data-qa='betslip-stake-input'], input[name='stake'], .betslip-stake-input input",
-    "bet_slip_odds": "[data-qa='betslip-odds'], .betslip-odds",
-    "place_bet": "[data-qa='betslip-place-bet'], button:has-text('PLACE BET'), button:has-text('STAKE')",
+    "bet_slip_stake": "[data-qa='stake-area'], [data-qa='betslip-stake-input'], input[name='stake'], .betslip-stake-input input",
+    "bet_slip_odds": "[data-qa='total-amounts-item-value'], [data-qa='betslip-odds'], .betslip-odds",
+    "place_bet": "[data-qa='place-bet-button'], [data-qa='betslip-place-bet'], button:has-text('ΣΤΟΙΧΗΜΑΤΙΣΕ'), button:has-text('PLACE BET'), button:has-text('STAKE')",
     # Feature 3: receipt selectors — read accepted stake back from confirmation
-    "bet_confirmation": "[data-qa='bet-receipt'], .bet-receipt",
+    "bet_confirmation": "[data-qa='bet-receipt'], .bet-receipt, .receipt-container",
     "receipt_stake": "[data-qa='receipt-stake']",    # Accepted stake amount
     "receipt_odds": "[data-qa='receipt-odds']",      # Confirmed odds
 }
@@ -63,9 +69,10 @@ class StoiximanPlacer:
     if it expires (e.g. after a long idle period).
     """
 
-    def __init__(self, headless: bool = True) -> None:
+    def __init__(self, headless: bool = True, cookie_path: str | None = None) -> None:
         self.settings = get_settings()
         self.headless = headless
+        self.cookie_path = get_cookie_file_path(cookie_path or self.settings.stoiximan_cookie_path)
         # Persistent session state
         self._pw = None          # playwright instance
         self._browser = None
@@ -239,44 +246,37 @@ class StoiximanPlacer:
         self._page.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
-        log.info("browser_started", headless=self.headless)
-
-
+        log.info("browser_started", headless=self.headless, cookie_path=str(self.cookie_path))
 
     # ------------------------------------------------------------------ cookies
-    _COOKIE_FILE = Path("/tmp/stoiximan_cookies.json")
 
     def _load_cookies(self, context) -> bool:
         """Load saved cookies into browser context. Returns True if loaded."""
-        if self._COOKIE_FILE.exists():
-            try:
-                cookies = json.loads(self._COOKIE_FILE.read_text())
-                context.add_cookies(cookies)
-                log.info("cookies_loaded", count=len(cookies))
-                return True
-            except Exception as e:
-                log.warning("cookie_load_failed", error=str(e))
-        return False
+        loaded, count = load_cookies_into_context(context, self.cookie_path)
+        return loaded
 
     def _save_cookies(self, context) -> None:
         """Save browser cookies to file for reuse in future sessions."""
-        try:
-            cookies = context.cookies()
-            self._COOKIE_FILE.write_text(json.dumps(cookies))
-            log.info("cookies_saved", count=len(cookies))
-        except Exception as e:
-            log.warning("cookie_save_failed", error=str(e))
+        save_cookies_from_context(context, self.cookie_path)
 
     def _is_logged_in(self, page) -> bool:
         """Check if we are already logged in (cookies still valid)."""
         try:
             page.goto(_LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
             time.sleep(2)  # Let JS render
+
+            # If user balance or account menu is visible → logged in!
+            logged_in_el = page.query_selector(SELECTORS["logged_in_indicator"])
+            if logged_in_el and logged_in_el.is_visible():
+                return True
+
             # If login button is visible → not logged in
             login_btn = page.query_selector(SELECTORS["login_button"])
             if login_btn and login_btn.is_visible():
                 return False
-            return True
+
+            # Fallback heuristic: check if login modal/button is not present
+            return login_btn is None
         except Exception:
             return False
 
@@ -318,12 +318,13 @@ class StoiximanPlacer:
 
     def _navigate_to_selection(self, page, request: PlacementRequest) -> None:
         try:
-            self._maybe_click(page, "[data-qa='search-icon']")
-            page.fill("input[type='search']", request.selection)
-            page.click("[data-qa='search-result']:first-child", timeout=5000)
+            if not self._maybe_click(page, "[data-qa='header-icons-search-icon']"):
+                self._maybe_click(page, "[data-qa='search-icon']")
+            page.fill("input[type='search'], [data-qa='search-input'], input[placeholder*='Αναζήτηση'], input[placeholder*='Search']", request.selection)
+            page.click("[data-qa='search-result']:first-child, [data-qa*='search-result']:first-child", timeout=5000)
             page.wait_for_load_state("networkidle")
             odds_str = str(request.target_odds).replace(".", ",")
-            page.click(f"button:has-text('{odds_str}')", timeout=5000)
+            page.click(f"button:has-text('{odds_str}'), [data-qa='event-selection']:has-text('{odds_str}')", timeout=5000)
         except Exception as e:
             log.error("navigate_to_selection_failed", error=str(e),
                       selection=request.selection)
@@ -410,3 +411,100 @@ class StoiximanPlacer:
             return True
         except Exception:
             return False
+
+
+def interactive_login(
+    url: str = _LOGIN_URL,
+    cookie_path: str | Path | None = None,
+    timeout_seconds: int = 180,
+) -> tuple[Path, int]:
+    """Launch a visible Chromium window to let the operator login to Stoiximan interactively.
+
+    Captures and saves all cookies to JSON upon successful login or confirmation.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError("playwright not installed; run `playwright install chromium`")
+
+    settings = get_settings()
+    target_path = get_cookie_file_path(cookie_path or settings.stoiximan_cookie_path)
+    log.info("starting_interactive_login", url=url, target_path=str(target_path))
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--start-maximized",
+            ],
+        )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1366, "height": 768},
+            locale="el-GR",
+            timezone_id="Europe/Athens",
+            java_script_enabled=True,
+        )
+
+        # Preload any existing cookies
+        load_cookies_into_context(context, target_path)
+
+        page = context.new_page()
+        page.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+
+        print("=" * 65)
+        print("🌐 Stoiximan Interactive Login Session")
+        print(f"Opening {url} ...")
+        print("=" * 65)
+
+        page.goto(url, wait_until="domcontentloaded")
+        time.sleep(2)
+
+        # If credentials configured and not logged in, auto-fill
+        if settings.stoiximan_username and settings.stoiximan_password:
+            try:
+                # Accept cookie banner
+                for sel in [SELECTORS["accept_cookies"]]:
+                    try:
+                        page.click(sel, timeout=2000)
+                        break
+                    except Exception:
+                        pass
+
+                # If login form openable
+                login_btn = page.query_selector(SELECTORS["login_button"])
+                if login_btn and login_btn.is_visible():
+                    login_btn.click(timeout=2000)
+                    time.sleep(0.5)
+
+                if page.query_selector(SELECTORS["username"]):
+                    page.fill(SELECTORS["username"], settings.stoiximan_username)
+                    page.fill(SELECTORS["password"], settings.stoiximan_password)
+                    print("Pre-filled username and password from configuration.")
+            except Exception:
+                pass
+
+        print("\n👉 Please finish login (and any Captcha / 2FA) in the browser window.")
+        print("👉 When logged in, press ENTER here in the terminal to save cookies.")
+        print("   (Or close the browser when done)\n")
+
+        try:
+            input("Press [Enter] after successful login: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nSaving current cookies before exiting...")
+
+        # Small grace period to ensure latest session cookies are written
+        time.sleep(1)
+        count = save_cookies_from_context(context, target_path)
+        browser.close()
+
+    return target_path, count

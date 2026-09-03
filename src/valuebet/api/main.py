@@ -251,50 +251,54 @@ def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
 @app.get("/cookie-status")
 def cookie_status() -> dict:
     """Return whether Stoiximan session cookies are saved and how old they are."""
-    cookie_file = Path("/tmp/stoiximan_cookies.json")
-    if not cookie_file.exists():
-        return {"has_cookies": False, "message": "No cookies saved. Please import cookies."}
-    stat = cookie_file.stat()
-    age_hours = (datetime.now(timezone.utc).timestamp() - stat.st_mtime) / 3600
-    count = len(json.loads(cookie_file.read_text()))
-    return {
-        "has_cookies": True,
-        "cookie_count": count,
-        "age_hours": round(age_hours, 1),
-        "message": f"{count} cookies saved, {age_hours:.1f} hours old."
-    }
+    from ..placement.session_store import get_cookie_status
+    return get_cookie_status()
 
 
 class CookieImport(BaseModel):
-    cookies: list[dict]  # Array of cookie objects from Cookie-Editor
+    cookies: list[dict]  # Array of cookie objects from Cookie-Editor / Playwright
 
 
 @app.post("/import-cookies")
 def import_cookies(body: CookieImport) -> dict:
     """Import Stoiximan session cookies exported from the browser.
 
-    Use the 'Cookie-Editor' Chrome/Firefox extension:
+    Use the 'Cookie-Editor' Chrome/Firefox extension or JSON array:
     1. Log in to stoiximan.com.cy manually in your browser.
     2. Click Cookie-Editor extension → Export → Export as JSON.
     3. Paste the JSON array here.
     """
     if not body.cookies:
         raise HTTPException(400, "cookies list is empty")
-    cookie_file = Path("/tmp/stoiximan_cookies.json")
-    cookie_file.write_text(json.dumps(body.cookies))
-    log.info("cookies_imported", count=len(body.cookies))
-    return {"success": True, "imported": len(body.cookies),
-            "message": f"✅ {len(body.cookies)} cookies imported! Bot will use these for login."}
+    from ..placement.session_store import save_raw_cookie_list
+    try:
+        count = save_raw_cookie_list(body.cookies)
+        return {
+            "success": True,
+            "imported": count,
+            "message": f"✅ {count} cookies imported and saved to JSON! Bot will reuse this session.",
+        }
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to save cookies: {exc}")
+
+
+@app.get("/export-cookies")
+def export_cookies() -> list[dict]:
+    """Export current Stoiximan session cookies as JSON."""
+    from ..placement.session_store import read_cookie_json
+    return read_cookie_json()
 
 
 @app.delete("/import-cookies")
 def clear_cookies() -> dict:
     """Clear saved Stoiximan cookies (forces re-login on next placement)."""
-    cookie_file = Path("/tmp/stoiximan_cookies.json")
-    if cookie_file.exists():
-        cookie_file.unlink()
-    return {"success": True, "message": "Cookies cleared. Bot will re-login on next placement."}
+    from ..placement.session_store import delete_cookie_file
+    deleted = delete_cookie_file()
+    if deleted:
+        return {"success": True, "message": "Cookies cleared from JSON file."}
+    return {"success": True, "message": "No cookie file found to delete."}
 
 
+@app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     return DASHBOARD_HTML
