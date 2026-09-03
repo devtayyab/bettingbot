@@ -91,6 +91,27 @@ DASHBOARD_HTML = """
   </div>
   <div id="status-bar" style="font-size:12px; color:#8a93a6; margin-bottom:12px;">Ready.</div>
 
+  <!-- Stoiximan Session Panel -->
+  <div id="session-panel" style="background:#161a22; border:1px solid #232836; border-radius:10px; padding:16px 20px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">
+      <strong style="font-size:14px;">🔐 Stoiximan Session & Cookies JSON</strong>
+      <span id="cookie-status-badge" class="pill">checking…</span>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        <button class="toolbtn" onclick="exportCookies()" style="font-size:12px;">📥 View / Export JSON</button>
+        <button class="toolbtn" onclick="clearCookies()" style="font-size:12px; background:#4a1a1a; color:#f0a3a3;">🗑 Clear Session</button>
+      </div>
+    </div>
+    <div id="cookie-import-area">
+      <p style="font-size:12px; color:#8a93a6; margin:0 0 8px 0; line-height:1.4;">
+        <b>Automatic Login:</b> Run in terminal <code>python -m valuebet.cli login-stoiximan</code> (browser will open and cookies will be saved).<br/>
+        <b>Manual Import:</b> Login in browser → <i>Cookie-Editor extension</i> → Export as JSON → paste here:
+      </p>
+      <textarea id="cookie-input" rows="3" placeholder='[{"name":"session","value":"abc...","domain":".stoiximan.com.cy",...}]'
+        style="width:100%; box-sizing:border-box; background:#0f1115; color:#e6e6e6; border:1px solid #232836; border-radius:6px; padding:8px; font-size:12px; font-family:monospace; resize:vertical;"></textarea>
+      <button id="btn-import" class="toolbtn" onclick="importCookies()" style="margin-top:8px; background:#2b5cb8; color:#fff;">⬆ Import & Save JSON Cookies</button>
+    </div>
+  </div>
+
   <table>
     <thead><tr>
       <th>Selection</th><th>Sport</th><th>Fair p</th><th>Pinnacle p</th>
@@ -199,9 +220,67 @@ async function scan(sport, live){
 
 function scanSelected(live){ const s = document.getElementById('sport-select').value; scan(s, live); }
 
+async function loadCookieStatus(){
+  try {
+    const r = await api('/cookie-status');
+    const badge = document.getElementById('cookie-status-badge');
+    if(r.has_cookies){
+      badge.style.background='#1a4a2a'; badge.style.color='#4ade80';
+      badge.textContent = `✅ ${r.cookie_count} cookies saved · ${r.age_hours}h ago`;
+    } else {
+      badge.style.background='#5a3a12'; badge.style.color='#ffce8a';
+      badge.textContent = '⚠ No session JSON found';
+    }
+  } catch(e){}
+}
+
+async function importCookies(){
+  const raw = document.getElementById('cookie-input').value.trim();
+  if(!raw){ toast('Paste cookies JSON array first!', 'err'); return; }
+  let cookies;
+  try { cookies = JSON.parse(raw); } catch(e){ toast('Invalid JSON! Check formatting and copy-paste again.', 'err', 8000); return; }
+  if(!Array.isArray(cookies)){ toast('Must be a JSON array of cookies [ ... ]', 'err'); return; }
+  setBtn('btn-import', true, '⬆ Import & Save JSON Cookies');
+  try {
+    const r = await api('/import-cookies', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({cookies})});
+    toast(r.message, 'ok', 8000);
+    document.getElementById('cookie-input').value = '';
+    loadCookieStatus();
+  } catch(e){}
+  finally { setBtn('btn-import', false, '⬆ Import & Save JSON Cookies'); }
+}
+
+async function exportCookies(){
+  try {
+    const cookies = await api('/export-cookies');
+    if(!cookies || cookies.length === 0){
+      toast('No cookies currently stored in JSON file.', 'inf');
+      return;
+    }
+    const formatted = JSON.stringify(cookies, null, 2);
+    document.getElementById('cookie-input').value = formatted;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(formatted);
+      toast(`📋 ${cookies.length} cookies loaded into text box & copied to clipboard!`, 'ok');
+    } else {
+      toast(`📋 ${cookies.length} cookies loaded into text box!`, 'ok');
+    }
+  } catch(e){ toast('Failed to export cookies: ' + e.message, 'err'); }
+}
+
+async function clearCookies(){
+  if(!confirm('Delete Stoiximan cookies JSON? You will need to login the bot again.')) return;
+  try {
+    const r = await api('/import-cookies', {method:'DELETE'});
+    toast(r.message, 'inf');
+    document.getElementById('cookie-input').value = '';
+    loadCookieStatus();
+  } catch(e){}
+}
+
 async function loadAll(){
   setBtn('btn-refresh', true, '↻ Refresh');
-  try { await Promise.all([loadHealth(), loadPnl(), loadSignals()]); setStatus('Last updated: '+new Date().toLocaleTimeString()); }
+  try { await Promise.all([loadHealth(), loadPnl(), loadSignals(), loadCookieStatus()]); setStatus('Last updated: '+new Date().toLocaleTimeString()); }
   catch(e){ setStatus('Refresh failed.'); }
   finally { setBtn('btn-refresh', false, '↻ Refresh'); }
 }

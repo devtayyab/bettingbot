@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     # Stoiximan
     stoiximan_username: str = ""
     stoiximan_password: str = ""
+    stoiximan_cookie_path: str = "data/stoiximan_cookies.json"
     placement_dry_run: bool = True
     placement_require_approval: bool = True
 

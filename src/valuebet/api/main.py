@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -243,6 +246,57 @@ def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
     """Return stake-acceptance summary for one bookmaker."""
     with session_scope() as session:
         return bookmaker_limit_summary(session, bookmaker, last_n)
+
+
+@app.get("/cookie-status")
+def cookie_status() -> dict:
+    """Return whether Stoiximan session cookies are saved and how old they are."""
+    from ..placement.session_store import get_cookie_status
+    return get_cookie_status()
+
+
+class CookieImport(BaseModel):
+    cookies: list[dict]  # Array of cookie objects from Cookie-Editor / Playwright
+
+
+@app.post("/import-cookies")
+def import_cookies(body: CookieImport) -> dict:
+    """Import Stoiximan session cookies exported from the browser.
+
+    Use the 'Cookie-Editor' Chrome/Firefox extension or JSON array:
+    1. Log in to stoiximan.com.cy manually in your browser.
+    2. Click Cookie-Editor extension → Export → Export as JSON.
+    3. Paste the JSON array here.
+    """
+    if not body.cookies:
+        raise HTTPException(400, "cookies list is empty")
+    from ..placement.session_store import save_raw_cookie_list
+    try:
+        count = save_raw_cookie_list(body.cookies)
+        return {
+            "success": True,
+            "imported": count,
+            "message": f"✅ {count} cookies imported and saved to JSON! Bot will reuse this session.",
+        }
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to save cookies: {exc}")
+
+
+@app.get("/export-cookies")
+def export_cookies() -> list[dict]:
+    """Export current Stoiximan session cookies as JSON."""
+    from ..placement.session_store import read_cookie_json
+    return read_cookie_json()
+
+
+@app.delete("/import-cookies")
+def clear_cookies() -> dict:
+    """Clear saved Stoiximan cookies (forces re-login on next placement)."""
+    from ..placement.session_store import delete_cookie_file
+    deleted = delete_cookie_file()
+    if deleted:
+        return {"success": True, "message": "Cookies cleared from JSON file."}
+    return {"success": True, "message": "No cookie file found to delete."}
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -9,3 +9,8 @@ venv/
 .ruff_cache/
 .mypy_cache/
 playwright-report/
+data/
+*.html
+scratch/
+dump_stoiximan.py
+get_betslip.py

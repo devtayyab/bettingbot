@@ -23,6 +23,13 @@ def main() -> None:
 
     sub.add_parser("pnl", help="print P&L summary")
 
+    p_login = sub.add_parser("login-stoiximan", help="interactive browser login to save Stoiximan session cookies")
+    p_login.add_argument("--url", default="https://www.stoiximan.com.cy/", help="Stoiximan website URL")
+    p_login.add_argument("--output", default=None, help="custom cookie JSON output path")
+
+    p_cookie = sub.add_parser("cookie-status", help="check saved Stoiximan session status")
+    p_cookie.add_argument("--path", default=None, help="custom cookie JSON path")
+
     args = parser.parse_args()
 
     if args.cmd == "init-db":
@@ -41,6 +48,19 @@ def main() -> None:
 
         with session_scope() as session:
             log.info("pnl", **pnl_summary(session))
+    elif args.cmd == "cookie-status":
+        from .placement.session_store import get_cookie_status
+
+        status = get_cookie_status(args.path)
+        log.info("cookie_status", **status)
+        print(f"Stoiximan Session Status: {status['message']}")
+        print(f"Path: {status['path']}")
+    elif args.cmd == "login-stoiximan":
+        from .placement.stoiximan import interactive_login
+
+        saved_path, count = interactive_login(url=args.url, cookie_path=args.output)
+        log.info("login_completed", path=str(saved_path), count=count)
+        print(f"✅ Successfully saved {count} cookies to {saved_path}")
 
 
 if __name__ == "__main__":
