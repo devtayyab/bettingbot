@@ -44,7 +44,13 @@ class ResultResolver(Protocol):
 
 
 class MockResultResolver:
-    """A dummy resolver that randomly settles completed matches for testing."""
+    """TEST ONLY — invents match results with `random`.
+
+    Never wire this into settlement: it would write fabricated wins, losses and
+    profit into the bets table and report them as realised P&L. Replace with a real
+    results feed (The-Odds-API scores, Sportmonks, API-Football) before enabling
+    automatic settlement.
+    """
 
     def fetch_result(self, event_id: str, sport: str) -> EventResult | None:
         # In a real system, this would call The-Odds-API, Sportmonks, or API-Football.
@@ -81,3 +87,14 @@ class MockResultResolver:
             
         # For unknown markets in the mock, randomly resolve
         return random.choice([BetOutcome.WON, BetOutcome.LOST])
+
+    def resolve(self, bet) -> BetOutcome:
+        """Resolve one bet. Returns PENDING when no result is available.
+
+        Callers previously invoked this method, which did not exist, and compared
+        against BetOutcome.UNKNOWN/WIN/LOSS, which are not members of the enum.
+        """
+        result = self.fetch_result(str(getattr(bet, "signal_id", "")), "unknown")
+        if result is None:
+            return BetOutcome.PENDING
+        return self.determine_outcome(result, "MATCH_ODDS", bet.selection)

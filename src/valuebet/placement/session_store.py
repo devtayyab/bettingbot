@@ -101,6 +101,8 @@ def load_cookies_into_context(context: Any, path: str | Path | None = None) -> t
     """
     file_path = get_cookie_file_path(path)
     if not file_path.exists():
+        log.warning("cookie_file_missing", path=str(file_path),
+                    msg="no saved session; a full login will be attempted")
         return False, 0
 
     try:
@@ -124,11 +126,24 @@ def load_cookies_into_context(context: Any, path: str | Path | None = None) -> t
             return False, 0
 
         context.add_cookies(sanitized)
-        log.info("cookies_loaded", path=str(file_path), count=len(sanitized))
+        # Expiry is the usual reason a working setup starts failing to log in.
+        now = datetime.now(timezone.utc).timestamp()
+        expired = [c["name"] for c in sanitized
+                   if isinstance(c.get("expires"), int) and 0 < c["expires"] < now]
+        age_hours = round((now - file_path.stat().st_mtime) / 3600, 1)
+        log.info("cookies_loaded", path=str(file_path), count=len(sanitized),
+                 age_hours=age_hours, expired_count=len(expired))
+        if expired:
+            log.warning("cookies_expired", count=len(expired), names=expired[:10],
+                        msg="session will likely be rejected; re-login or re-import")
+        elif age_hours > 24:
+            log.warning("cookies_stale", age_hours=age_hours,
+                        msg="session cookies are over a day old and may be rejected")
         return True, len(sanitized)
 
     except Exception as exc:
-        log.warning("cookie_load_failed", path=str(file_path), error=str(exc))
+        log.warning("cookie_load_failed", path=str(file_path), error=str(exc),
+                    msg="placement will fall back to a username/password login")
         return False, 0
 
 

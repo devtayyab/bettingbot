@@ -9,8 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.models import MarketSnapshot, ValueSignal
+from ..logging import get_logger
 from .models import Bet, BookmakerLimitEvent, Event, Market, OddsSnapshot, Signal
 from ..core.results import MockResultResolver, BetOutcome
+
+log = get_logger("db.repository")
 
 # Statuses for which a signal is considered "still live" and must not be re-created.
 OPEN_STATUSES = ("detected", "approved")
@@ -59,6 +62,10 @@ def save_signal(session: Session, sig: ValueSignal) -> Signal | None:
     """Persist a signal, or return None if an equivalent open signal already exists."""
     event_id = _safe_event_id(sig.event_id)
     if has_open_signal(session, event_id, sig.market_type, sig.selection):
+        # Not an error: repeated polls re-detect the same opportunity. Logged so a
+        # scan reporting "0 new signals" is distinguishable from finding nothing.
+        log.debug("signal_deduped", event_id=event_id, selection=sig.selection,
+                  market_type=sig.market_type)
         return None
     row = Signal(
         event_id=event_id,
@@ -75,6 +82,17 @@ def save_signal(session: Session, sig: ValueSignal) -> Signal | None:
     )
     session.add(row)
     session.flush()
+    log.info(
+        "signal_saved",
+        signal_id=row.id,
+        event_id=event_id,
+        selection=sig.selection,
+        sport=sig.sport.value,
+        target_bookmaker=sig.target_bookmaker,
+        target_odds=sig.target_odds,
+        edge=round(sig.edge, 4),
+        recommended_stake=sig.recommended_stake,
+    )
     return row
 
 
@@ -93,11 +111,24 @@ def record_bet(
     dry_run: bool,
     note: str | None = None,
     requested_stake: float | None = None,  # Feature 3: what we asked for
+    bookmaker: str = "stoiximan",
+    verified: bool = False,
 ) -> Bet:
+    """Persist a placement attempt.
+
+    The signal status distinguishes what actually happened at the book, because
+    "placed" previously covered dry runs too — so the dashboard showed bets as
+    placed that had never been sent anywhere:
+
+      placed      real money on, verified in the book's own bet list
+      unconfirmed real attempt, but we could not verify it — operator must check
+      paper       dry run: a paper-trading record only, nothing was staked
+    """
     actual_edge = (signal.fair_prob * placed_odds) - 1.0 if signal.fair_prob else None
     _requested = requested_stake if requested_stake is not None else stake
     bet = Bet(
         signal_id=signal.id,
+        book=bookmaker,
         selection=signal.selection,
         placed_odds=placed_odds,
         requested_stake=_requested,     # Feature 3
@@ -108,19 +139,62 @@ def record_bet(
         note=note,
         placed_at=datetime.now(timezone.utc),
     )
-    signal.status = "placed"
+    if dry_run:
+        signal.status = "paper"
+    elif verified:
+        signal.status = "placed"
+    else:
+        signal.status = "unconfirmed"
     session.add(bet)
     session.flush()
+
+    log.info(
+        "bet_recorded",
+        bet_id=bet.id,
+        signal_id=signal.id,
+        signal_status=signal.status,
+        bookmaker=bookmaker,
+        selection=signal.selection,
+        placed_odds=placed_odds,
+        requested_stake=_requested,
+        accepted_stake=stake,
+        dry_run=dry_run,
+        verified_on_platform=verified,
+        actual_edge=round(actual_edge, 4) if actual_edge is not None else None,
+        note=note,
+    )
+    if not dry_run and not verified:
+        # Real money may be committed without us having confirmed it at the book.
+        # This is the case that has to be impossible to miss in the logs.
+        log.error(
+            "bet_recorded_unverified",
+            bet_id=bet.id,
+            bookmaker=bookmaker,
+            selection=signal.selection,
+            stake=stake,
+            msg="bet was NOT found at the bookmaker — verify manually before trusting P&L",
+        )
     return bet
 
 
 def pnl_summary(session: Session) -> dict:
-    """Realised P&L over settled bets, plus open exposure."""
-    bets = list(session.scalars(select(Bet)))
+    """Realised P&L over settled bets, plus open exposure.
+
+    Dry-run (paper) bets are reported separately and never counted in the real
+    figures — mixing them in is what made a dry-run-only deployment look like it
+    had live bets and live exposure.
+    """
+    all_bets = list(session.scalars(select(Bet)))
+    bets = [b for b in all_bets if not b.dry_run]
+    paper = [b for b in all_bets if b.dry_run]
     settled = [b for b in bets if b.outcome in {"won", "lost", "void"} and b.profit is not None]
     realised = sum(b.profit for b in settled)
     staked = sum(b.stake for b in settled)
     open_exposure = sum(b.stake for b in bets if b.outcome == "pending")
+    unconfirmed_ids = set(
+        session.scalars(select(Signal.id).where(Signal.status == "unconfirmed")).all()
+    )
+    unconfirmed = [b for b in bets if b.signal_id in unconfirmed_ids]
     roi = (realised / staked) if staked else 0.0
     return {
         "bets_total": len(bets),
@@ -129,6 +203,11 @@ def pnl_summary(session: Session) -> dict:
         "total_staked_settled": round(staked, 2),
         "roi": round(roi, 4),
         "open_exposure": round(open_exposure, 2),
+        # Paper trail from dry runs — informational only, no money involved.
+        "paper_bets": len(paper),
+        "paper_exposure": round(sum(b.stake for b in paper if b.outcome == "pending"), 2),
+        # Real attempts we could not verify at the bookmaker. Check these manually.
+        "unconfirmed_bets": len(unconfirmed),
     }
 
 
@@ -138,6 +217,8 @@ def get_event_exposure(session: Session, event_id: int) -> float:
         select(Bet.stake)
         .join(Signal)
         .where(Signal.event_id == event_id)
+        # Dry-run bets stake nothing, so they must not consume real exposure.
+        .where(Bet.dry_run.is_(False))
         .where(Bet.outcome.in_(("pending", "won", "lost")))
     )
     stakes = session.scalars(stmt).all()
@@ -211,7 +292,7 @@ def update_clv_for_pending_bets(session: Session) -> int:
 
     if updated > 0:
         session.flush()
-        
+    log.info("clv_updated", candidates=len(rows), updated=updated)
     return updated
 
 
@@ -240,6 +321,9 @@ def save_limit_event(
     )
     session.add(event)
     session.flush()
+    log.debug("limit_event_saved", bookmaker=bookmaker, requested=requested_stake,
+              accepted=accepted_stake, ratio=event.acceptance_ratio,
+              rejected=was_rejected)
     return event
 
 
@@ -277,49 +361,13 @@ def all_bookmaker_limit_summaries(session: Session) -> list[dict]:
     return [bookmaker_limit_summary(session, bk) for bk in bookmakers]
 
 
-def update_clv_for_pending_bets(session: Session) -> int:
-    """Update closing-line value for all bets that are still pending settlement.
-    
-    CLV = placed_odds / closing_fair_odds - 1
-    Since we use The Odds API (not real-time stream), we approximate by checking
-    if the bet's placed_odds still beat the current reference price.
-    Returns count of bets updated.
-    """
-    stmt = select(Bet).where(Bet.outcome.is_(None))
-    pending = list(session.scalars(stmt))
-    updated = 0
-    for bet in pending:
-        # For now, mark CLV as 0 (neutral) until we integrate real closing prices.
-        # In production, fetch the current Betfair price here and compare.
-        if bet.clv is None:
-            bet.clv = 0.0
-            updated += 1
-    return updated
-
-
 def settle_pending_bets(session: Session) -> int:
-    """Auto-settle bets whose results can be determined from the results resolver.
-    
-    Returns count of bets settled.
-    """
-    from ..core.results import MockResultResolver, BetOutcome
-    stmt = select(Bet).where(Bet.outcome.is_(None))
-    pending = list(session.scalars(stmt))
-    resolver = MockResultResolver()
-    settled = 0
-    for bet in pending:
-        outcome = resolver.resolve(bet)
-        if outcome == BetOutcome.UNKNOWN:
-            continue
-        if outcome == BetOutcome.WIN:
-            bet.outcome = "won"
-            bet.profit = round(bet.stake * (bet.placed_odds - 1), 2)
-        elif outcome == BetOutcome.LOSS:
-            bet.outcome = "lost"
-            bet.profit = -bet.stake
-        elif outcome == BetOutcome.VOID:
-            bet.outcome = "void"
-            bet.profit = 0.0
-        settled += 1
-    return settled
+    """Auto-settle bets from a real result feed.
 
+    Intentionally a no-op: the only resolver in the codebase is MockResultResolver,
+    which invents scores with random.randint. Wiring that into the scheduler would
+    write fabricated wins, losses and profit into the bets table and report them as
+    realised P&L. Settlement is manual (POST /bets/{id}/settle) until a real
+    results feed is integrated here.
+    """
+    return 0

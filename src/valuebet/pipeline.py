@@ -35,10 +35,24 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
 
         bf  = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
         pin = TheOddsAPISource(target_bookmaker="pinnacle",      name="pinnacle")
-        # Betano = Stoiximan (same Kaizen Gaming platform, same odds feed).
-        # We use Betano via The Odds API as the target bookmaker to scan for value.
-        # When a signal is found, placement still hits the real Stoiximan account.
-        tgt = TheOddsAPISource(target_bookmaker="betano_uk",        name="stoiximan")
+        # The target book's prices are read from ODDS_API_TARGET_BOOKMAKER but the
+        # bet is placed on PLACEMENT_BOOKMAKER. When those are different books the
+        # detected price does not exist on the site we bet into: the placement
+        # worker looks for odds the book never offered, so it either abandons on
+        # price protection or clicks the wrong selection. Betano and Stoiximan are
+        # sister Kaizen brands but are separate markets with separate prices.
+        if s.odds_api_target_bookmaker.split("_")[0] != s.placement_bookmaker:
+            log.warning(
+                "target_bookmaker_mismatch",
+                quoting=s.odds_api_target_bookmaker,
+                placing_on=s.placement_bookmaker,
+                msg="signals are priced from a different book than the one we bet on; "
+                    "placement will usually fail price protection",
+            )
+        tgt = TheOddsAPISource(
+            target_bookmaker=s.odds_api_target_bookmaker,
+            name=s.placement_bookmaker,
+        )
 
         try:
             from .sources.betfair_stream import BetfairStreamSource
@@ -82,9 +96,16 @@ def run_scan(sport: Sport, live: bool = False) -> int:
     # and the detected signals, so we never re-hit the source APIs.
     result = engine.scan(sport, live)
 
-    # If no signals detected from live source, run demo sources so value signals are generated for testing
-    if len(result.signals) == 0:
-        log.info("fallback_to_demo_sources", sport=sport.value)
+    # A scan finding nothing is the normal case: value is rare. Substituting mock
+    # data here used to persist fabricated signals ("Team A", "Real Madrid" at
+    # invented odds) as if they were real opportunities — they exist at no
+    # bookmaker, so approving one and pressing Place could never produce a bet.
+    if len(result.signals) == 0 and get_settings().allow_demo_fallback:
+        log.warning(
+            "fallback_to_demo_sources",
+            sport=sport.value,
+            msg="ALLOW_DEMO_FALLBACK is on: persisting FAKE signals that cannot be placed",
+        )
         bf_mock, pin_mock, stx_mock = demo_sources()
         mock_engine = ValueEngine(bf_mock, pin_mock, [stx_mock])
         result = mock_engine.scan(sport, live)

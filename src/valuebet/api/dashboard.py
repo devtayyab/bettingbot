@@ -83,13 +83,16 @@ DASHBOARD_HTML = """
       <option value="">all signals</option>
       <option value="detected">detected</option>
       <option value="approved">approved</option>
-      <option value="placed">placed</option>
+      <option value="placed">placed (verified)</option>
+      <option value="unconfirmed">unconfirmed ⚠</option>
+      <option value="paper">paper (dry-run)</option>
       <option value="rejected">rejected</option>
       <option value="failed">failed</option>
     </select>
     <button id="btn-refresh" class="toolbtn" onclick="loadAll()">↻ Refresh</button>
   </div>
   <div id="status-bar" style="font-size:12px; color:#8a93a6; margin-bottom:12px;">Ready.</div>
+  <div id="health-warnings"></div>
 
   <!-- Stoiximan Session Panel -->
   <div id="session-panel" style="background:#161a22; border:1px solid #232836; border-radius:10px; padding:16px 20px; margin-bottom:20px;">
@@ -150,8 +153,18 @@ async function loadHealth(){
   const h = await api('/health');
   document.getElementById('env').textContent = 'env: '+h.env;
   const m = document.getElementById('mode');
-  if(h.dry_run){ m.className='pill warn'; m.textContent='DRY-RUN (no real bets)'; }
+  if(h.dry_run){ m.className='pill warn'; m.textContent='DRY-RUN — nothing is staked at the bookmaker'; }
   else { m.className='pill live'; m.textContent='🟢 LIVE PLACEMENT'; }
+  // These make the "our side looks fine but no bet exists" configurations visible.
+  const warns = [];
+  if(h.demo_fallback) warns.push('DEMO FALLBACK ON — signals may be fabricated and unplaceable');
+  if(!h.has_session_cookies) warns.push('no Stoiximan session cookies — placement will fail');
+  else if(h.cookie_age_hours > 24) warns.push('session cookies are '+h.cookie_age_hours+'h old');
+  if(h.db_backend === 'sqlite') warns.push('DB is local SQLite, not the configured database');
+  const w = document.getElementById('health-warnings');
+  if(w) w.innerHTML = warns.length
+    ? warns.map(t=>`<div style="background:#4a2a1a;color:#f0c9a3;border:1px solid #6b3d1f;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px;">⚠ ${t}</div>`).join('')
+    : '';
 }
 
 async function loadPnl(){
@@ -161,7 +174,9 @@ async function loadPnl(){
     <div class="card"><div class="v ${cls}">${p.realised_pnl.toFixed(2)}</div><div class="l">Realised P&L</div></div>
     <div class="card"><div class="v">${pct(p.roi)}</div><div class="l">ROI (settled)</div></div>
     <div class="card"><div class="v">${p.bets_settled}/${p.bets_total}</div><div class="l">Settled / Total bets</div></div>
-    <div class="card"><div class="v">${p.open_exposure.toFixed(2)}</div><div class="l">Open exposure</div></div>`;
+    <div class="card"><div class="v">${p.open_exposure.toFixed(2)}</div><div class="l">Open exposure (real)</div></div>
+    <div class="card"><div class="v">${p.paper_bets ?? 0}</div><div class="l">Paper bets (dry-run, not staked)</div></div>
+    <div class="card"><div class="v ${(p.unconfirmed_bets>0)?'neg':''}">${p.unconfirmed_bets ?? 0}</div><div class="l">Unconfirmed — check the book</div></div>`;
 }
 
 async function loadSignals(){
@@ -196,9 +211,18 @@ async function place(id, btn){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>Placing…';
   try {
     const r = await api('/signals/'+id+'/place', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'});
-    const prefix = r.dry_run ? '[DRY-RUN] ' : '';
-    const msg = prefix + (r.message||'') + (r.placed_odds ? (' @ '+r.placed_odds) : '');
-    toast(msg, r.success ? 'ok' : 'err', 8000);
+    // Report the bookmaker-side outcome, not just `success`: a dry run succeeds
+    // without staking anything, and an unconfirmed bet may or may not exist.
+    const label = {
+      placed: '✅ PLACED & VERIFIED on Stoiximan',
+      dry_run: '📝 DRY-RUN — no bet exists at the bookmaker',
+      unconfirmed: '⚠ UNCONFIRMED — check Stoiximan manually',
+      rejected: '⛔ REJECTED by the bookmaker',
+      error: '❌ ERROR — no bet sent',
+    }[r.status] || (r.success ? 'OK' : 'FAILED');
+    const msg = label + ' — ' + (r.message||'') + (r.placed_odds ? (' @ '+r.placed_odds) : '');
+    const tone = r.placed_on_platform ? 'ok' : (r.status === 'dry_run' ? 'inf' : 'err');
+    toast(msg, tone, r.needs_manual_check ? 20000 : 8000);
     loadAll();
   } catch(e){ btn.disabled=false; btn.textContent='Place'; }
 }
