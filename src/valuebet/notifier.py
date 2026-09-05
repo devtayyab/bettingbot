@@ -5,7 +5,7 @@ Sends alerts when new value bets are detected or placed.
 
 from __future__ import annotations
 
-import requests
+import httpx
 
 from .config import get_settings
 from .core.models import ValueSignal
@@ -20,6 +20,10 @@ class Notifier:
         self.enabled = bool(self.settings.telegram_bot_token and self.settings.telegram_chat_id)
         if self.enabled:
             self.base_url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
+        else:
+            # Otherwise "I got no alert" is indistinguishable from "nothing happened".
+            log.debug("notifications_disabled",
+                      msg="TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set; no alerts will be sent")
 
     def _send_message(self, text: str) -> None:
         if not self.enabled:
@@ -31,7 +35,9 @@ class Notifier:
                 "text": text,
                 "parse_mode": "HTML",
             }
-            res = requests.post(self.base_url, json=payload, timeout=5)
+            # httpx, not requests: requests was never declared in pyproject, so on a
+            # clean install this import took down notifier -> executor -> the API.
+            res = httpx.post(self.base_url, json=payload, timeout=5)
             res.raise_for_status()
         except Exception as e:
             log.error("telegram_notify_failed", error=str(e))

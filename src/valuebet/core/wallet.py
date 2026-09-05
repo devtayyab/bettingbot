@@ -7,6 +7,9 @@ from ..logging import get_logger
 
 log = get_logger("core.wallet")
 
+# Set once the mock-wallet warning has been emitted for this process.
+_WARNED = False
+
 
 class WalletManager(Protocol):
     """Protocol for fetching real-time bankroll balances from bookmakers."""
@@ -25,6 +28,18 @@ class MockWalletManager:
             "bet365": 500.0,
             "pinnacle": 1000.0
         }
+        # Kelly sizing is driven by these numbers, so a hardcoded balance means
+        # stakes are computed against a bankroll the account may not have. Warn
+        # once per process: a ValueEngine (and so a wallet) is built per sport per
+        # scan, which would otherwise repeat this dozens of times a cycle.
+        global _WARNED
+        if not _WARNED:
+            _WARNED = True
+            log.warning(
+                "mock_wallet_in_use",
+                balances=self.balances,
+                msg="stake sizing uses hardcoded balances, not real bookmaker funds",
+            )
 
     def get_balance(self, bookmaker: str) -> float:
         balance = self.balances.get(bookmaker, 0.0)

@@ -54,6 +54,33 @@ def match_markets(
             best_overlap = overlap
             best = cand
     # Require a strict majority of selections to align.
-    if best is not None and best_overlap >= max(2, len(target_keys) - 1):
+    required = max(2, len(target_keys) - 1)
+    if best is not None and best_overlap >= required:
         return best
+
+    # A silent None here is why a scan can report "0 signals" with no explanation:
+    # if the feeds spell the teams differently, every market is dropped before any
+    # value check runs. Full detail at debug; the engine reports a bounded sample
+    # of these at info in its scan funnel, so the common case stays readable.
+    log.debug(
+        "market_unmatched",
+        event_id=target.event_id,
+        market_type=target.market_type,
+        sport=getattr(target.sport, "value", str(target.sport)),
+        target_selections=sorted(target_keys),
+        best_overlap=best_overlap,
+        required_overlap=required,
+        best_candidate=sorted(
+            {selection_key(s) for s in best.selections()}
+        ) if best is not None else None,
+        candidates_considered=len(candidates),
+        # Without the other side's names there is nothing to compare against, so
+        # a name-normalisation mismatch stays invisible. Capped to keep the line
+        # readable when a feed returns hundreds of markets.
+        candidate_selections=[
+            sorted({selection_key(s) for s in c.selections()})
+            for c in candidates
+            if c.market_type == target.market_type and c.sport == target.sport
+        ][:5],
+    )
     return None

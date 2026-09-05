@@ -104,6 +104,25 @@ class Settings(BaseSettings):
     placement_dry_run: bool = True
     placement_require_approval: bool = True
 
+    # When true, a scan that finds no real value falls back to the deterministic
+    # mock sources. Those produce fake events ("Team A", "Real Madrid" at invented
+    # odds) that exist at no bookmaker, so a signal from them can never be placed.
+    # Useful for demoing the UI; must stay false in any real deployment.
+    allow_demo_fallback: bool = False
+
+    # When true, an unreachable DATABASE_URL is a hard error instead of silently
+    # falling back to a local SQLite file that nothing else reads.
+    strict_database: bool = True
+
+    # The Odds API bookmaker key whose prices we treat as the target book's.
+    # This MUST be the book we actually place on. It defaulted to "betano_uk"
+    # while placement hits stoiximan.com.cy: sister brands, but separate markets
+    # with different prices, so the price a signal was detected at does not exist
+    # on the site the bot then tries to bet it on.
+    odds_api_target_bookmaker: str = "betano_uk"
+    # The book placement is routed to. Must correspond to the key above.
+    placement_bookmaker: str = "stoiximan"
+
 
 def get_settings() -> Settings:
     return Settings()
