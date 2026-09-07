@@ -1,6 +1,7 @@
 """Unit tests for multi-sport coverage, market size (volume & liquidity) health checks, and latency controls."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from valuebet.config import Settings
 from valuebet.core.models import MarketSnapshot, MarketStatus, Quote, Sport
 from valuebet.engine.value_engine import ValueEngine
@@ -54,7 +55,7 @@ def test_market_size_volume_rejection():
 
 def test_market_liquidity_rejection():
     # Target quote back_liquidity is 2.0, below min_liquidity of 10.0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ref_snap = MarketSnapshot(
         event_id="evt-1",
         market_id="m1",
@@ -103,7 +104,7 @@ def test_market_liquidity_rejection():
 
 def test_stale_odds_latency_rejection():
     # Quote captured 10 seconds ago, max_live_latency_seconds is 3.0s
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_time = now - timedelta(seconds=10)
     
     ref_snap = MarketSnapshot(

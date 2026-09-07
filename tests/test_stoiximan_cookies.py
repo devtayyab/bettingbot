@@ -1,15 +1,11 @@
 """Unit tests for Stoiximan cookie storage, sanitization, and session persistence."""
 
-import json
+import typing
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from valuebet.placement.session_store import (
-    clear_cookies,
     delete_cookie_file,
-    get_cookie_file_path,
     get_cookie_status,
     load_cookies_into_context,
     read_cookie_json,
@@ -65,21 +61,23 @@ def test_sanitize_cookie_samesite_normalization():
 
     # sameSite: "lax"
     raw_lax = {"name": "c2", "value": "v2", "sameSite": "lax"}
-    assert sanitize_cookie(raw_lax)["sameSite"] == "Lax"
+    cleaned_lax = sanitize_cookie(raw_lax)
+    assert cleaned_lax is not None
+    assert cleaned_lax["sameSite"] == "Lax"
 
 
 def test_sanitize_invalid_cookie():
-    assert sanitize_cookie("not a dict") is None
+    assert sanitize_cookie(typing.cast(dict[str, typing.Any], "not a dict")) is None
     assert sanitize_cookie({}) is None
     assert sanitize_cookie({"name": "foo"}) is None
 
 
 def test_save_and_read_raw_cookie_list(tmp_path: Path):
     target = tmp_path / "test_cookies.json"
-    raw_cookies = [
+    raw_cookies = typing.cast(list[dict[str, typing.Any]], [
         {"name": "c1", "value": "v1", "domain": ".stoiximan.com.cy"},
         {"name": "c2", "value": "v2", "expirationDate": 1800000000},
-    ]
+    ])
 
     count = save_raw_cookie_list(raw_cookies, path=target)
     assert count == 2
@@ -101,7 +99,7 @@ def test_cookie_status_flow(tmp_path: Path):
     assert status_empty["cookie_count"] == 0
 
     # Save cookies
-    save_raw_cookie_list([{"name": "s1", "value": "val"}], path=target)
+    save_raw_cookie_list(typing.cast(list[dict[str, typing.Any]], [{"name": "s1", "value": "val"}]), path=target)
 
     # Status after creation
     status_populated = get_cookie_status(path=target)

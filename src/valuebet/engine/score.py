@@ -13,8 +13,8 @@ Classes:
 
 from __future__ import annotations
 
-from typing import Protocol, Optional
 from dataclasses import dataclass
+from typing import Protocol
 
 from ..logging import get_logger
 
@@ -26,12 +26,12 @@ class EventState:
     home_score: int
     away_score: int
     period: str             # e.g., '1H', 'HT', '2H', 'ET1', 'PEN'
-    clock_seconds: Optional[int]
+    clock_seconds: int | None
     is_suspended: bool = False
 
 
 class ScoreTracker(Protocol):
-    def get_state(self, event_id: str, source: str) -> Optional[EventState]:
+    def get_state(self, event_id: str, source: str) -> EventState | None:
         """Fetch the live state for a given event on a given source."""
         ...
 
@@ -62,7 +62,7 @@ class BetfairScoreTracker:
         """Call at the start of each scan cycle to flush stale states."""
         self._state_cache.clear()
 
-    def get_state(self, event_id: str, source: str) -> Optional[EventState]:
+    def get_state(self, event_id: str, source: str) -> EventState | None:
         """Return the live EventState for the given Betfair event_id.
 
         Falls back to None (which will cause states_match to return False
@@ -82,10 +82,10 @@ class BetfairScoreTracker:
             log.error("betfair_score_fetch_failed", event_id=event_id, error=str(exc))
             return None
 
-    def _fetch_from_api(self, event_id: str) -> Optional[EventState]:
+    def _fetch_from_api(self, event_id: str) -> EventState | None:
         """Call Betfair list_market_book to get suspension + score info."""
         try:
-            import betfairlightweight
+            import betfairlightweight  # type: ignore
             from betfairlightweight import filters
         except ImportError:
             log.error("betfairlightweight_not_installed")
@@ -116,7 +116,7 @@ class BetfairScoreTracker:
             self._state_cache[event_id] = state
         return state
 
-    def _parse_books(self, books, event_id: str) -> Optional[EventState]:
+    def _parse_books(self, books, event_id: str) -> EventState | None:
         """Parse market book response into EventState."""
         for book in books:
             # market status is ACTIVE | SUSPENDED | CLOSED | INACTIVE
@@ -175,7 +175,7 @@ class PlaywrightScoreReader:
     def clear_cache(self) -> None:
         self._state_cache.clear()
 
-    def get_state(self, event_id: str, source: str) -> Optional[EventState]:
+    def get_state(self, event_id: str, source: str) -> EventState | None:
         """Scrape Stoiximan DOM for the live score of the given event."""
         if source != "stoiximan":
             return None
@@ -187,7 +187,7 @@ class PlaywrightScoreReader:
             log.error("stoiximan_score_scrape_failed", event_id=event_id, error=str(exc))
             return None
 
-    def _scrape(self, event_id: str) -> Optional[EventState]:
+    def _scrape(self, event_id: str) -> EventState | None:
         try:
             from playwright.sync_api import sync_playwright
             url = f"https://www.stoiximan.gr/live/?event_id={event_id}"
@@ -243,7 +243,7 @@ class CompositeScoreTracker:
         for t in self._trackers.values():
             t.clear_cache()
 
-    def get_state(self, event_id: str, source: str) -> Optional[EventState]:
+    def get_state(self, event_id: str, source: str) -> EventState | None:
         tracker = self._trackers.get(source)
         if tracker is None:
             log.warning("no_score_tracker_for_source", source=source)
@@ -261,7 +261,7 @@ class DummyScoreTracker:
     Always returns 0-0 1H so the pipeline can run end-to-end without a real
     data provider. DO NOT use in production (ENV=prod).
     """
-    def get_state(self, event_id: str, source: str) -> Optional[EventState]:
+    def get_state(self, event_id: str, source: str) -> EventState | None:
         return EventState(home_score=0, away_score=0, period="1H",
                           clock_seconds=60, is_suspended=False)
 
@@ -271,8 +271,8 @@ class DummyScoreTracker:
 # ---------------------------------------------------------------------------
 
 def states_match(
-    ref_state: Optional[EventState],
-    target_state: Optional[EventState],
+    ref_state: EventState | None,
+    target_state: EventState | None,
     strict: bool = True,
 ) -> bool:
     """Compare two event states. Returns True only when safe to bet.
@@ -337,14 +337,14 @@ def _normalise_period(raw: str) -> str:
     return raw.upper() or "1H"
 
 
-def _safe_int(text: Optional[str], default: int = 0) -> int:
+def _safe_int(text: str | None, default: int = 0) -> int:
     try:
         return int((text or "").strip())
     except (ValueError, AttributeError):
         return default
 
 
-def _parse_clock(text: str) -> Optional[int]:
+def _parse_clock(text: str) -> int | None:
     """Parse 'MM:SS' or 'MM'' clock text into total seconds."""
     if not text:
         return None

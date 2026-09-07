@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Protocol
 
@@ -68,7 +68,7 @@ class MockResultResolver:
             home_score=home_score,
             away_score=away_score,
             completed=True,
-            completed_at=datetime.now(timezone.utc)
+            completed_at=datetime.now(UTC)
         )
 
     def determine_outcome(self, result: EventResult, market_type: str, selection: str) -> BetOutcome:

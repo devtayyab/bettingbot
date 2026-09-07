@@ -11,10 +11,8 @@ from the top-level grid without clicking into each event is not feasible.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
-from ..config import get_settings
 from ..core.models import MarketSnapshot, MarketStatus, Quote, SettlementRule, Sport
 from ..logging import get_logger
 
@@ -87,14 +85,14 @@ class BetfairSource:
             return []
 
         snapshots = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         
         # Build URL based on sport
         # Example: https://www.betfair.com/exchange/plus/en/football-betting-1
         sport_path = "football" if sport == Sport.SOCCER else sport.value.lower()
         url = f"https://www.betfair.com/exchange/plus/en/{sport_path}-betting-1"
         if live:
-            url = f"https://www.betfair.com/exchange/plus/en/inplay"
+            url = "https://www.betfair.com/exchange/plus/en/inplay"
 
         try:
             with sync_playwright() as p:

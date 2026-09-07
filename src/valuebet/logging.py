@@ -21,7 +21,8 @@ def configure_logging() -> None:
 
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
 
-    processors = [
+    import typing
+    processors: list[typing.Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),

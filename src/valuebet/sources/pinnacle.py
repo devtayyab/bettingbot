@@ -9,7 +9,7 @@ Auth is HTTP Basic. Docs: https://pinnacleapi.github.io/
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -71,7 +71,7 @@ class PinnacleSource:
             for ev in league.get("events", [])
         }
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snapshots: list[MarketSnapshot] = []
         for league in odds.get("leagues", []):
             for ev in league.get("events", []):

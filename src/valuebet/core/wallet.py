@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Protocol
+
 from ..logging import get_logger
 
 log = get_logger("core.wallet")
@@ -22,7 +23,7 @@ class WalletManager(Protocol):
 class MockWalletManager:
     """A dummy wallet manager that starts with a set balance and logs deductions."""
     
-    def __init__(self, initial_balances: dict[str, float] = None) -> None:
+    def __init__(self, initial_balances: dict[str, float] | None = None) -> None:
         self.balances: dict[str, float] = initial_balances or {
             "stoiximan": 500.0,
             "bet365": 500.0,

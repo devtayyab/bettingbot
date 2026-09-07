@@ -6,7 +6,8 @@ without requiring direct exchange API credentials or certs.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -66,7 +67,7 @@ class TheOddsAPISource:
 
         sport_keys = _SPORT_KEYS.get(sport, ["upcoming"])
         snapshots: list[MarketSnapshot] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Diagnostics: distinguish "the API returned nothing" from "our bookmaker
         # key is not in the response", which look identical from the outside.
         events_seen = 0

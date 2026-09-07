@@ -8,8 +8,8 @@ poll the cache instantaneously without network latency.
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 try:
     from betfairlightweight.resources.streamingresources import MarketBookCache
@@ -52,12 +52,12 @@ class BetfairStreamSource:
         self._stream = None
         self._listener = None
         self._cache_lock = threading.Lock()
-        self._market_caches: Dict[str, MarketBookCache] = {}
+        self._market_caches: dict[str, MarketBookCache] = {}
         self._is_running = False
 
     def start(self, sport: Sport) -> None:
         """Start the background streaming thread for live markets."""
-        import betfairlightweight
+        import betfairlightweight  # type: ignore
 
         if self._is_running:
             return
@@ -112,7 +112,7 @@ class BetfairStreamSource:
             return self.fallback.fetch_markets(sport, live)
 
         snapshots: list[MarketSnapshot] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         with self._cache_lock:
             # We copy the dictionary items to avoid dict size changing during iteration

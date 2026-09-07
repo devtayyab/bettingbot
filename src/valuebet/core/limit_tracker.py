@@ -13,8 +13,7 @@ The API exposes a /limits endpoint so the operator can monitor account health.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -24,7 +23,7 @@ class LimitEvent:
     requested_stake: float
     accepted_stake: float
     was_rejected: bool          # True if the bet was refused entirely
-    placed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    placed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     note: str = ""
 
     @property
@@ -60,7 +59,7 @@ class BookmakerLimitTracker:
         """Record a new stake-acceptance measurement."""
         self._events.setdefault(event.bookmaker, []).append(event)
 
-    def acceptance_rate(self, bookmaker: str, last_n: int = 20) -> Optional[float]:
+    def acceptance_rate(self, bookmaker: str, last_n: int = 20) -> float | None:
         """Rolling acceptance rate over the last `last_n` bets.
 
         Returns None if there are fewer than MIN_SAMPLES observations.
@@ -103,7 +102,7 @@ class BookmakerLimitTracker:
 
 
 # Singleton — shared between the engine and the API layer.
-_limit_tracker: Optional[BookmakerLimitTracker] = None
+_limit_tracker: BookmakerLimitTracker | None = None
 
 
 def get_limit_tracker() -> BookmakerLimitTracker:

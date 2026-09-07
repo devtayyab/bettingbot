@@ -7,7 +7,7 @@ sizing, signal persistence and the dashboard before real API keys are configured
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ..core.models import MarketSnapshot, MarketStatus, Quote, Sport
 
@@ -19,7 +19,7 @@ class MockSource:
         self._odds_table = odds_table
 
     def fetch_markets(self, sport: Sport, live: bool = False) -> list[MarketSnapshot]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snapshots: list[MarketSnapshot] = []
         for i, (market_id, quotes) in enumerate(self._odds_table.items()):
             snapshots.append(

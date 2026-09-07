@@ -4,7 +4,7 @@ These cover the reported failure: the app showed bets as placed while nothing wa
 on the platform.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -33,7 +33,7 @@ def _signal(session, event_id=1, stake=5.0):
         event_id=event_id, market_type="MATCH_ODDS", selection="Real Madrid",
         sport="soccer", fair_prob=0.6, confirm_prob=0.6, target_odds=1.9,
         edge=0.14, recommended_stake=stake, status="approved",
-        detected_at=datetime.now(timezone.utc),
+        detected_at=datetime.now(UTC),
     )
     session.add(sig)
     session.flush()

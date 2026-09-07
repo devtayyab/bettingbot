@@ -108,8 +108,8 @@ class ScanResult:
     the value signals detected. Fetching happens once, here, so callers never
     re-hit the source APIs to persist odds."""
 
-    snapshots: list["MarketSnapshot"]
-    signals: list["ValueSignal"]
+    snapshots: list[MarketSnapshot]
+    signals: list[ValueSignal]
 
 
 @dataclass(frozen=True)
