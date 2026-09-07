@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
@@ -40,7 +37,7 @@ class SignalOut(BaseModel):
     sport: str
     market_type: str
     fair_prob: float
-    confirm_prob: Optional[float]
+    confirm_prob: float | None
     target_odds: float
     edge: float
     recommended_stake: float

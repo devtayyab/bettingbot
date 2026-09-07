@@ -1,8 +1,10 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 import logging
+
 from valuebet.core.models import Sport
 from valuebet.sources.betfair import BetfairSource
 
@@ -19,7 +21,7 @@ def main():
     print(f"\nExtracted {len(snapshots)} markets.")
     for s in snapshots:
         print(f"\nEvent: {s.event_id} | Rule: {s.settlement_rule} | Suspended: {s.is_suspended}")
-        print(f"Quotes:")
+        print("Quotes:")
         for q in s.quotes:
             print(f"  - {q.selection}: {q.decimal_odds}")
 

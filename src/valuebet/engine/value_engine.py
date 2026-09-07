@@ -16,22 +16,27 @@ persistence is the caller's job.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..config import Settings, get_settings
 from ..core import odds_math
 from ..core.models import MarketSnapshot, MarketStatus, ScanResult, Sport, ValueSignal
-from ..logging import get_logger
-from ..sources.base import OddsSource
-from .matching import match_markets, selection_key
 from ..core.odds_math import (
-    fair_odds,
     kelly_stake,
 )
 from ..core.wallet import MockWalletManager
-from .score import CompositeScoreTracker, DummyScoreTracker, BetfairScoreTracker, PlaywrightScoreReader, states_match
+from ..db.repository import _safe_event_id, get_event_exposure
 from ..db.session import session_scope
-from ..db.repository import get_event_exposure, _safe_event_id
+from ..logging import get_logger
+from ..sources.base import OddsSource
+from .matching import match_markets, selection_key
+from .score import (
+    BetfairScoreTracker,
+    CompositeScoreTracker,
+    DummyScoreTracker,
+    PlaywrightScoreReader,
+    states_match,
+)
 
 log = get_logger("engine.value")
 
@@ -247,7 +252,7 @@ class ValueEngine:
             }
 
         out: list[ValueSignal] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Per-selection drop reasons. Logging each one individually would drown the
         # log at scan volume, so they are tallied and reported once per market —
         # enough to tell "no value today" from "every selection fails one gate".

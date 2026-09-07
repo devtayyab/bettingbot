@@ -9,7 +9,7 @@ Handles:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +127,7 @@ def load_cookies_into_context(context: Any, path: str | Path | None = None) -> t
 
         context.add_cookies(sanitized)
         # Expiry is the usual reason a working setup starts failing to log in.
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         expired = [c["name"] for c in sanitized
                    if isinstance(c.get("expires"), int) and 0 < c["expires"] < now]
         age_hours = round((now - file_path.stat().st_mtime) / 3600, 1)
@@ -197,7 +197,7 @@ def get_cookie_status(path: str | Path | None = None) -> dict[str, Any]:
         count = len(data) if isinstance(data, list) else 0
 
         stat = file_path.stat()
-        age_hours = round((datetime.now(timezone.utc).timestamp() - stat.st_mtime) / 3600, 1)
+        age_hours = round((datetime.now(UTC).timestamp() - stat.st_mtime) / 3600, 1)
 
         return {
             "has_cookies": count > 0,

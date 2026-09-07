@@ -1,8 +1,10 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 import logging
+
 from valuebet.core.models import Sport
 from valuebet.sources.the_odds_api import TheOddsAPISource
 

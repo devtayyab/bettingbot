@@ -8,14 +8,14 @@ from valuebet.core.odds_math import (
     DevigMethod,
     booksum,
     devig,
+    devig_from_probs,
     edge,
     fair_odds,
     implied_prob,
     kelly_fraction,
     kelly_stake,
-    overround,
     midpoint_prob,
-    devig_from_probs,
+    overround,
 )
 
 

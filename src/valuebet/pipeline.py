@@ -7,8 +7,6 @@ for validating the pilot's plumbing before API keys exist.
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 from .config import get_settings
 from .core.models import Sport
 from .db.repository import save_signal, save_snapshots
@@ -69,9 +67,9 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
         return betfair, pinnacle, [stoiximan], BetfairStreamSource(betfair)
 
     from .sources.betfair import BetfairSource
+    from .sources.betfair_stream import BetfairStreamSource
     from .sources.pinnacle import PinnacleSource
     from .sources.stoiximan import StoiximanSource
-    from .sources.betfair_stream import BetfairStreamSource
 
     bf = BetfairSource()
     targets = [StoiximanSource(headless=True)]

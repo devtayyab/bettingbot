@@ -1,16 +1,15 @@
 """Test script for Stoiximan placer on AWS or local."""
 
-import os
 import sys
-import time
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from valuebet.placement.stoiximan import StoiximanPlacer
 from valuebet.placement.base import PlacementRequest
+from valuebet.placement.stoiximan import StoiximanPlacer
+
 
 def main():
     print("========================================")

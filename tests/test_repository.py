@@ -1,6 +1,6 @@
 """Repository tests: deterministic event ids and signal de-duplication (SQLite)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -29,7 +29,7 @@ def _signal(selection="Team A", edge=0.07):
         selection=selection, sport=Sport.SOCCER, fair_prob=0.6, confirm_prob=0.59,
         target_bookmaker="stoiximan",
         target_odds=1.8, edge=edge, recommended_stake=10.0,
-        detected_at=datetime.now(timezone.utc),
+        detected_at=datetime.now(UTC),
     )
 
 

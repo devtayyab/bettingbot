@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 import time
+import typing
 from pathlib import Path
 
 from ..config import get_settings
@@ -192,9 +193,9 @@ class StoiximanPlacer:
         self.cookie_path = get_cookie_file_path(cookie_path or self.settings.stoiximan_cookie_path)
         # Persistent session state
         self._pw = None          # playwright instance
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._browser: typing.Any = None
+        self._context: typing.Any = None
+        self._page: typing.Any = None
         self._logged_in = False
 
     # ------------------------------------------------------------------ public
@@ -399,9 +400,9 @@ class StoiximanPlacer:
         except Exception:
             pass
         finally:
-            self._page = None
-            self._context = None
-            self._browser = None
+            self._page: typing.Any = None
+            self._context: typing.Any = None
+            self._browser: typing.Any = None
             self._pw = None
             self._logged_in = False
 

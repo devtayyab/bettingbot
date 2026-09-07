@@ -13,8 +13,8 @@ from pathlib import Path
 root_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root_dir / "src"))
 
-from valuebet.placement.stoiximan import interactive_login
 from valuebet.placement.session_store import get_cookie_status
+from valuebet.placement.stoiximan import interactive_login
 
 
 def main():

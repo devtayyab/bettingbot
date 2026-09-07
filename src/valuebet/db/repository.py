@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.models import MarketSnapshot, ValueSignal
 from ..logging import get_logger
-from .models import Bet, BookmakerLimitEvent, Event, Market, OddsSnapshot, Signal
-from ..core.results import MockResultResolver, BetOutcome
+from .models import Bet, BookmakerLimitEvent, Event, OddsSnapshot, Signal
 
 log = get_logger("db.repository")
 
@@ -137,7 +136,7 @@ def record_bet(
         outcome="pending",
         dry_run=dry_run,
         note=note,
-        placed_at=datetime.now(timezone.utc),
+        placed_at=datetime.now(UTC),
     )
     if dry_run:
         signal.status = "paper"
@@ -188,9 +187,9 @@ def pnl_summary(session: Session) -> dict:
     bets = [b for b in all_bets if not b.dry_run]
     paper = [b for b in all_bets if b.dry_run]
     settled = [b for b in bets if b.outcome in {"won", "lost", "void"} and b.profit is not None]
-    realised = sum(b.profit for b in settled)
-    staked = sum(b.stake for b in settled)
-    open_exposure = sum(b.stake for b in bets if b.outcome == "pending")
+    realised = sum((b.profit or 0.0) for b in settled)
+    staked = sum((b.stake or 0.0) for b in settled)
+    open_exposure = sum((b.stake or 0.0) for b in bets if b.outcome == "pending")
     unconfirmed_ids = set(
         session.scalars(select(Signal.id).where(Signal.status == "unconfirmed")).all()
     )
@@ -243,11 +242,11 @@ def _safe_event_id(raw: str | int) -> int:
 
 def update_clv_for_pending_bets(session: Session) -> int:
     """Find pending bets for events starting within 10 minutes, calculate CLV, and save."""
-    from .models import Event
-    from ..core.odds_math import implied_prob, midpoint_prob
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    from ..core.odds_math import implied_prob, midpoint_prob
+
+    now = datetime.now(UTC)
     target_time = now + timedelta(minutes=10)
 
     # Find pending bets with no CLV where the event starts soon
@@ -317,7 +316,7 @@ def save_limit_event(
         acceptance_ratio=round(ratio, 4),
         was_rejected=was_rejected,
         note=note,
-        placed_at=datetime.now(timezone.utc),
+        placed_at=datetime.now(UTC),
     )
     session.add(event)
     session.flush()

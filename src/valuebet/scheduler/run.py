@@ -13,11 +13,11 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 from ..config import get_settings
 from ..core.models import Sport
-from ..db.repository import update_clv_for_pending_bets, settle_pending_bets
+from ..db.repository import settle_pending_bets, update_clv_for_pending_bets
 from ..db.session import session_scope
+from ..engine.executor import Executor, PlacementRouter
 from ..logging import configure_logging, get_logger
 from ..pipeline import run_scan
-from ..engine.executor import Executor, PlacementRouter
 
 log = get_logger("scheduler")
 

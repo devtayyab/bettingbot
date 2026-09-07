@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,22 +30,22 @@ class Settings(BaseSettings):
     pinnacle_password: str = ""
 
     # Value engine
-    edge_threshold: float = Field(0.01, ge=0, le=1)
-    live_edge_threshold: float = Field(0.03, ge=0, le=1)
-    confirmation_tolerance: float = Field(0.15, ge=0, le=1)
-    max_live_latency_seconds: float = Field(3.0, gt=0)
-    max_prematch_latency_seconds: float = Field(300.0, gt=0)
+    edge_threshold: float = Field(default=0.01, ge=0, le=1)
+    live_edge_threshold: float = Field(default=0.03, ge=0, le=1)
+    confirmation_tolerance: float = Field(default=0.15, ge=0, le=1)
+    max_live_latency_seconds: float = Field(default=3.0, gt=0)
+    max_prematch_latency_seconds: float = Field(default=300.0, gt=0)
     # Market Health
-    min_total_matched: float = Field(1000.0, ge=0)
-    min_liquidity: float = Field(10.0, ge=0)
-    max_spread: float = Field(0.10, ge=0, le=1)
+    min_total_matched: float = Field(default=1000.0, ge=0)
+    min_liquidity: float = Field(default=10.0, ge=0)
+    max_spread: float = Field(default=0.10, ge=0, le=1)
     # When true, a signal requires a matching Pinnacle price; never bet on Betfair alone.
     require_confirmation: bool = False
-    favorite_min_prob: float = Field(0.10, ge=0, le=1)
-    kelly_fraction: float = Field(0.25, ge=0, le=1)
-    max_stake: float = Field(10.0, gt=0)
-    max_event_exposure: float = Field(25.0, gt=0)
-    bankroll: float = Field(500.0, gt=0)
+    favorite_min_prob: float = Field(default=0.10, ge=0, le=1)
+    kelly_fraction: float = Field(default=0.25, ge=0, le=1)
+    max_stake: float = Field(default=10.0, gt=0)
+    max_event_exposure: float = Field(default=25.0, gt=0)
+    bankroll: float = Field(default=500.0, gt=0)
 
     # Dynamic Sport Overrides (JSON string mapped to dict)
     sport_overrides: dict[str, dict] = Field(

@@ -5,9 +5,7 @@ pages and extract the live odds from the DOM.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import time
-from typing import Any
+from datetime import UTC, datetime
 
 from ..core.models import MarketSnapshot, MarketStatus, Quote, SettlementRule, Sport
 from ..logging import get_logger
@@ -36,7 +34,7 @@ class StoiximanSource:
             return []
 
         snapshots = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         
         # Build URL based on sport
         # In reality, this needs to be mapped to Stoiximan's exact URL paths.
@@ -46,7 +44,7 @@ class StoiximanSource:
             
         url = f"https://www.stoiximan.gr/sport/{sport_path}/"
         if live:
-            url = f"https://www.stoiximan.gr/live/"
+            url = "https://www.stoiximan.gr/live/"
 
         try:
             with sync_playwright() as p:

@@ -7,7 +7,6 @@ high-volume, append-only odds feed scales independently of the relational tables
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -39,8 +38,8 @@ class Event(Base):
     name: Mapped[str] = mapped_column(String(255))
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     # Cross-source identity: store each source's native id so we can join feeds.
-    betfair_event_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
-    pinnacle_event_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    betfair_event_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    pinnacle_event_id: Mapped[str | None] = mapped_column(String(64), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     markets: Mapped[list[Market]] = relationship(back_populates="event")
@@ -55,7 +54,7 @@ class Market(Base):
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
     market_type: Mapped[str] = mapped_column(String(64))   # MATCH_ODDS / 1X2 / ...
     status: Mapped[str] = mapped_column(String(16), default="prematch")
-    betfair_market_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    betfair_market_id: Mapped[str | None] = mapped_column(String(64), index=True)
 
     event: Mapped[Event] = relationship(back_populates="markets")
 
@@ -76,10 +75,10 @@ class OddsSnapshot(Base):
     market_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     selection: Mapped[str] = mapped_column(String(128), primary_key=True)
     decimal_odds: Mapped[float] = mapped_column(Float)
-    lay_odds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    back_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    lay_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    total_matched: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lay_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    back_liquidity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lay_liquidity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_matched: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         Index("ix_odds_event_source_time", "event_id", "source", "captured_at"),
@@ -98,7 +97,7 @@ class Signal(Base):
     sport: Mapped[str] = mapped_column(String(32))
 
     fair_prob: Mapped[float] = mapped_column(Float)
-    confirm_prob: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confirm_prob: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_odds: Mapped[float] = mapped_column(Float)
     edge: Mapped[float] = mapped_column(Float, index=True)
     recommended_stake: Mapped[float] = mapped_column(Float)
@@ -108,7 +107,7 @@ class Signal(Base):
         DateTime(timezone=True), server_default=func.now(), index=True
     )
 
-    bet: Mapped[Optional["Bet"]] = relationship(back_populates="signal", uselist=False)
+    bet: Mapped[Bet | None] = relationship(back_populates="signal", uselist=False)
 
 
 class Bet(Base):
@@ -124,16 +123,16 @@ class Bet(Base):
     # Feature 3: Track requested vs accepted stake to detect bookmaker stake reduction.
     requested_stake: Mapped[float] = mapped_column(Float)           # What we asked for
     stake: Mapped[float] = mapped_column(Float)                     # What was accepted
-    actual_edge: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    clv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    actual_edge: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clv: Mapped[float | None] = mapped_column(Float, nullable=True)
     # pending / won / lost / void / failed
     outcome: Mapped[str] = mapped_column(String(16), default="pending", index=True)
-    profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     dry_run: Mapped[bool] = mapped_column(default=True)
     placed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     signal: Mapped[Signal] = relationship(back_populates="bet")
 
@@ -153,7 +152,7 @@ class BookmakerLimitEvent(Base):
     accepted_stake: Mapped[float] = mapped_column(Float)
     acceptance_ratio: Mapped[float] = mapped_column(Float)  # accepted / requested
     was_rejected: Mapped[bool] = mapped_column(default=False)
-    note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
     placed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
