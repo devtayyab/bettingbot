@@ -10,12 +10,14 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -102,12 +104,24 @@ class Signal(Base):
     edge: Mapped[float] = mapped_column(Float, index=True)
     recommended_stake: Mapped[float] = mapped_column(Float)
 
+    # Live / Pre-match indicator
+    is_live: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When the underlying event starts (UTC)
+    event_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Maximum bet amount available (from bookmaker or config cap)
+    max_bet: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Whether all required data variables were present when the signal was created
+    variables_complete: Mapped[bool] = mapped_column(Boolean, default=True)
+
     status: Mapped[str] = mapped_column(String(16), default="detected", index=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
 
     bet: Mapped[Bet | None] = relationship(back_populates="signal", uselist=False)
+    allocations: Mapped[list[BetAllocation]] = relationship(
+        back_populates="signal", cascade="all, delete-orphan"
+    )
 
 
 class Bet(Base):
@@ -125,7 +139,7 @@ class Bet(Base):
     stake: Mapped[float] = mapped_column(Float)                     # What was accepted
     actual_edge: Mapped[float | None] = mapped_column(Float, nullable=True)
     clv: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # pending / won / lost / void / failed
+    # pending / won / lost / void / failed / cancelled
     outcome: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     dry_run: Mapped[bool] = mapped_column(default=True)
@@ -159,4 +173,66 @@ class BookmakerLimitEvent(Base):
 
     __table_args__ = (
         Index("ix_limit_events_bookmaker_time", "bookmaker", "placed_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Customer / Account management
+# ---------------------------------------------------------------------------
+
+
+class Account(Base):
+    """A customer (or operator sub-account) that receives a percentage of each bet."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    bookmaker: Mapped[str] = mapped_column(String(64), default="stoiximan")
+    # % share of every stake allocated to this account (0.0–1.0)
+    percentage_share: Mapped[float] = mapped_column(Float, default=1.0)
+    # Initial deposit in account currency
+    initial_deposit: Mapped[float] = mapped_column(Float, default=0.0)
+    # Paused accounts are skipped when allocating new bets
+    is_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    notes: Mapped[list[AccountNote]] = relationship(
+        back_populates="account", cascade="all, delete-orphan", order_by="AccountNote.created_at.desc()"
+    )
+    allocations: Mapped[list[BetAllocation]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class AccountNote(Base):
+    """Free-text note attached to a customer account."""
+
+    __tablename__ = "account_notes"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    account: Mapped[Account] = relationship(back_populates="notes")
+
+
+class BetAllocation(Base):
+    """Maps a signal to a customer account with the calculated stake share."""
+
+    __tablename__ = "bet_allocations"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    # allocated_stake = signal.recommended_stake * account.percentage_share
+    allocated_stake: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    signal: Mapped[Signal] = relationship(back_populates="allocations")
+    account: Mapped[Account] = relationship(back_populates="allocations")
+
+    __table_args__ = (
+        UniqueConstraint("signal_id", "account_id", name="uq_allocation_signal_account"),
     )
