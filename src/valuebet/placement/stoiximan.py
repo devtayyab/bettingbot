@@ -471,7 +471,7 @@ class StoiximanPlacer:
                 "--start-maximized",
             ]
         )
-        context_kwargs = {
+        context_kwargs: dict[str, typing.Any] = {
             "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
