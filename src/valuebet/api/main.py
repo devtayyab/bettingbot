@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import get_settings
@@ -47,6 +48,13 @@ from .dashboard import DASHBOARD_HTML
 configure_logging()
 log = get_logger("api")
 app = FastAPI(title="ValueBet Pilot", version="0.2.0")
+
+
+@app.middleware("http")
+async def rewrite_api_prefix(request, call_next):
+    if request.scope.get("path", "").startswith("/api/"):
+        request.scope["path"] = request.scope["path"][4:]
+    return await call_next(request)
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -855,10 +863,41 @@ def debug_screenshot():
 
 
 # ---------------------------------------------------------------------------
-# Root — legacy HTML dashboard
+# Frontend static files & Root dashboard
 # ---------------------------------------------------------------------------
 
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+if not _FRONTEND_DIST.exists():
+    _FRONTEND_DIST = Path("frontend/dist")
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard() -> str:
+if (_FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+
+
+@app.get("/favicon.svg")
+def favicon_svg():
+    fav = _FRONTEND_DIST / "favicon.svg"
+    if fav.exists():
+        return FileResponse(fav)
+    raise HTTPException(404)
+
+
+@app.get("/icons.svg")
+def icons():
+    ic = _FRONTEND_DIST / "icons.svg"
+    if ic.exists():
+        return FileResponse(ic)
+    raise HTTPException(404)
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+def legacy_dashboard() -> str:
     return DASHBOARD_HTML
+
+
+@app.get("/")
+def dashboard():
+    index_file = _FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return HTMLResponse(DASHBOARD_HTML)

@@ -13,6 +13,7 @@ COPY pyproject.toml ./
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
+COPY frontend ./frontend
 RUN pip install --no-cache-dir -e ".[dev]"
 
 # Install Playwright browser and OS dependencies into the image
