@@ -820,7 +820,7 @@ class StoiximanPlacer:
             "placement_attempt_finished",
             bookmaker=result.bookmaker,
             selection=request.selection,
-            status=result.status.value,
+            status=result.status.value if result.status else "unknown",
             verified_on_platform=result.verified_on_platform,
             placed_odds=result.placed_odds,
             requested_stake=result.requested_stake,
