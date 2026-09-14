@@ -141,6 +141,10 @@ class ConfigUpdateIn(BaseModel):
     allow_demo_fallback: bool | None = None
 
 
+class OddsApiKeyIn(BaseModel):
+    api_key: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -276,6 +280,117 @@ def clear_cookies() -> dict:
     from ..placement.session_store import delete_cookie_file
     delete_cookie_file()
     return {"message": "Cookies deleted."}
+
+
+@app.get("/odds-api/status")
+async def get_odds_api_status() -> dict:
+    """Check the current Odds API key status, remaining quota, and validity."""
+    s = get_settings()
+    key = os.environ.get("THE_ODDS_API_KEY") or s.the_odds_api_key or ""
+    if not key:
+        return {
+            "configured": False,
+            "valid": False,
+            "masked_key": "",
+            "message": "No Odds API key configured",
+            "requests_remaining": None,
+            "requests_used": None,
+        }
+
+    masked = (key[:6] + "..." + key[-4:]) if len(key) > 10 else "***"
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={key}")
+            rem = resp.headers.get("x-requests-remaining")
+            used = resp.headers.get("x-requests-used")
+            if resp.status_code == 200:
+                return {
+                    "configured": True,
+                    "valid": True,
+                    "masked_key": masked,
+                    "message": "API Key is Active & LIVE",
+                    "requests_remaining": int(rem) if rem and rem.isdigit() else rem,
+                    "requests_used": int(used) if used and used.isdigit() else used,
+                }
+            elif resp.status_code == 401:
+                return {
+                    "configured": True,
+                    "valid": False,
+                    "masked_key": masked,
+                    "message": "Invalid or Expired API key (Unauthorized 401)",
+                    "requests_remaining": 0,
+                    "requests_used": None,
+                }
+            else:
+                return {
+                    "configured": True,
+                    "valid": False,
+                    "masked_key": masked,
+                    "message": f"API returned status {resp.status_code}",
+                    "requests_remaining": rem,
+                    "requests_used": used,
+                }
+    except Exception as exc:
+        return {
+            "configured": True,
+            "valid": False,
+            "masked_key": masked,
+            "message": f"Network check failed: {exc}",
+            "requests_remaining": None,
+            "requests_used": None,
+        }
+
+
+@app.post("/odds-api/update")
+async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
+    """Validate and update the Odds API key, saving it to .env and runtime environment."""
+    new_key = body.api_key.strip()
+    if not new_key:
+        raise HTTPException(400, "API key cannot be empty")
+
+    import httpx
+    # 1. Test key validity first with live call
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={new_key}")
+            rem = resp.headers.get("x-requests-remaining")
+            used = resp.headers.get("x-requests-used")
+            if resp.status_code != 200:
+                detail = "Invalid or expired key (Unauthorized 401)" if resp.status_code == 401 else f"Status {resp.status_code}"
+                raise HTTPException(400, f"API key test failed: {detail}")
+    except httpx.HTTPError as exc:
+        raise HTTPException(400, f"Failed to connect to The Odds API: {exc}")
+
+    # 2. Save to .env
+    env_path = Path(".env")
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith("THE_ODDS_API_KEY="):
+                new_lines.append(f"THE_ODDS_API_KEY={new_key}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f"THE_ODDS_API_KEY={new_key}")
+        env_path.write_text("\n".join(new_lines) + "\n")
+
+    # 3. Update runtime process env
+    os.environ["THE_ODDS_API_KEY"] = new_key
+    log.info("odds_api_key_updated", remaining=rem)
+
+    masked = (new_key[:6] + "..." + new_key[-4:]) if len(new_key) > 10 else "***"
+    return {
+        "success": True,
+        "valid": True,
+        "masked_key": masked,
+        "message": f"API key is valid and now LIVE! ({rem} requests remaining)",
+        "requests_remaining": int(rem) if rem and rem.isdigit() else rem,
+        "requests_used": int(used) if used and used.isdigit() else used,
+    }
 
 @app.patch("/config")
 def patch_config(body: ConfigUpdateIn) -> dict:

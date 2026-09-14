@@ -78,11 +78,63 @@ export const Settings: React.FC = () => {
   const [cookieUploading, setCookieUploading] = useState(false);
   const [cookieStatus, setCookieStatus] = useState<{msg: string, type: string} | null>(null);
 
+  // Odds API Key Management
+  const [oddsKeyInput, setOddsKeyInput] = useState('');
+  const [oddsApiStatus, setOddsApiStatus] = useState<{
+    configured: boolean;
+    valid: boolean;
+    masked_key: string;
+    message: string;
+    requests_remaining: number | string | null;
+    requests_used: number | string | null;
+  } | null>(null);
+  const [checkingOddsApi, setCheckingOddsApi] = useState(false);
+  const [savingOddsApi, setSavingOddsApi] = useState(false);
+  const [oddsApiFeedback, setOddsApiFeedback] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+  const fetchOddsApiStatus = async () => {
+    setCheckingOddsApi(true);
+    try {
+      const res = await fetch(`${API}/odds-api/status`);
+      if (res.ok) {
+        setOddsApiStatus(await res.json());
+      }
+    } finally {
+      setCheckingOddsApi(false);
+    }
+  };
+
+  const handleUpdateOddsKey = async () => {
+    if (!oddsKeyInput.trim()) return;
+    setSavingOddsApi(true);
+    setOddsApiFeedback(null);
+    try {
+      const res = await fetch(`${API}/odds-api/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: oddsKeyInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOddsApiFeedback({ msg: data.message || "API key saved and now LIVE!", type: 'success' });
+        setOddsKeyInput('');
+        fetchOddsApiStatus();
+      } else {
+        setOddsApiFeedback({ msg: data.detail || "Failed to update API key", type: 'error' });
+      }
+    } catch (e: any) {
+      setOddsApiFeedback({ msg: e.message || "Network error", type: 'error' });
+    } finally {
+      setSavingOddsApi(false);
+    }
+  };
+
   useEffect(() => {
     fetch(`${API}/config`)
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => setError('Failed to load config'));
+    fetchOddsApiStatus();
   }, []);
 
   const getValue = (key: string) => {
@@ -261,6 +313,122 @@ export const Settings: React.FC = () => {
 
       <div className="settings-groups">
         
+        {/* The Odds API Key Management Section */}
+        <div className="glass-panel settings-group" style={{ borderColor: 'rgba(99, 102, 241, 0.3)', marginBottom: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+            <div className="section-title" style={{ margin: 0 }}>
+              🔑 The Odds API Key & Live Quota
+            </div>
+            {oddsApiStatus && (
+              <span
+                className="pill"
+                style={{
+                  background: oddsApiStatus.valid ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                  color: oddsApiStatus.valid ? '#34d399' : '#f87171',
+                  fontWeight: 600,
+                  fontSize: '0.78rem',
+                  padding: '4px 10px',
+                }}
+              >
+                {oddsApiStatus.valid ? '● Active & Live' : '● Invalid / Expired'}
+              </span>
+            )}
+          </div>
+
+          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 'var(--space-4)' }}>
+            Check if your Odds API key is active or expired, view remaining quota, and update it live without server restarts.
+          </div>
+
+          {/* Current Quota Status Cards */}
+          {oddsApiStatus && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 'var(--space-3)',
+              background: 'rgba(0, 0, 0, 0.25)',
+              padding: 'var(--space-3)',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: 'var(--space-4)',
+            }}>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Current Key</div>
+                <div style={{ fontSize: '1rem', fontWeight: 600, fontFamily: 'monospace', color: 'var(--brand-accent)' }}>
+                  {oddsApiStatus.masked_key || 'Not configured'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Requests Remaining</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#34d399' }}>
+                  {oddsApiStatus.requests_remaining !== null ? `${oddsApiStatus.requests_remaining}` : '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Requests Used</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {oddsApiStatus.requests_used !== null ? `${oddsApiStatus.requests_used}` : '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Status</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: oddsApiStatus.valid ? '#34d399' : '#f87171' }}>
+                  {oddsApiStatus.message}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Feedback banner */}
+          {oddsApiFeedback && (
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: 'var(--space-4)',
+              background: oddsApiFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              color: oddsApiFeedback.type === 'success' ? '#34d399' : '#f87171',
+              border: oddsApiFeedback.type === 'success' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+              fontSize: '0.875rem',
+            }}>
+              {oddsApiFeedback.msg}
+            </div>
+          )}
+
+          {/* Form to update key */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              placeholder="Paste new Odds API key (e.g. d78aa876cd16f312...)"
+              value={oddsKeyInput}
+              onChange={(e) => setOddsKeyInput(e.target.value)}
+              style={{
+                flex: 1,
+                minWidth: '280px',
+                padding: '10px 14px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-elevated)',
+                border: 'var(--glass-border)',
+                color: '#fff',
+                fontFamily: 'monospace',
+                fontSize: '0.875rem',
+              }}
+            />
+            <button
+              className="btn btn-secondary"
+              onClick={fetchOddsApiStatus}
+              disabled={checkingOddsApi}
+              title="Test current key status"
+            >
+              {checkingOddsApi ? 'Checking…' : '🔍 Check Status'}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleUpdateOddsKey}
+              disabled={savingOddsApi || !oddsKeyInput.trim()}
+            >
+              {savingOddsApi ? 'Validating & Saving…' : '⚡ Verify & Set Live'}
+            </button>
+          </div>
+        </div>
+
         {/* Cookies Section */}
         <div className="glass-panel settings-group">
           <div className="section-title">🍪 Browser Cookies (Stoiximan)</div>
