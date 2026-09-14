@@ -235,6 +235,18 @@ class StoiximanPlacer:
             self._ensure_session()
         except Exception as exc:
             msg = f"session error: {exc}"
+            if dry_run:
+                # In testing / dry-run mode, record paper bet at target odds even without active bookmaker session
+                sim_msg = f"DRY-RUN: simulated paper bet recorded at {request.target_odds} (no bookmaker session required)"
+                log.info("placement_dry_run_simulated", selection=request.selection,
+                         odds=request.target_odds, stake=request.stake, note=sim_msg)
+                return PlacementResult(
+                    success=True, placed_odds=request.target_odds,
+                    requested_stake=request.stake, accepted_stake=request.stake,
+                    dry_run=True, message=sim_msg,
+                    bookmaker=BOOKMAKER_NAME, status=PlacementStatus.DRY_RUN,
+                    verified_on_platform=False,
+                )
             log.error("session_failed", error=msg)
             return self._finish(
                 request, dry_run,
