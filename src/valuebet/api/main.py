@@ -1,23 +1,42 @@
-"""FastAPI service: signals feed, approval workflow, manual placement, P&L, dashboard."""
+"""FastAPI service: signals feed, approval workflow, manual placement, P&L, dashboard,
+accounts management, reports, live config editing, and real-time SSE feed.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..config import get_settings
 from ..core.models import Sport
-from ..db.models import Bet, Signal
+from ..db.models import Account, AccountNote, Bet, Signal
 from ..db.repository import (
+    add_account_note,
     all_bookmaker_limit_summaries,
     bookmaker_limit_summary,
+    cancel_signal,
+    create_account,
+    delete_account_note,
+    export_csv,
+    export_xlsx,
+    generate_report,
+    get_account,
+    get_account_activity,
+    list_account_notes,
+    list_accounts,
     open_signals,
     pnl_summary,
     record_bet,
     save_limit_event,
+    update_account,
+    update_signal,
 )
 from ..db.session import get_engine, session_scope
 from ..logging import configure_logging, get_logger
@@ -27,7 +46,11 @@ from .dashboard import DASHBOARD_HTML
 
 configure_logging()
 log = get_logger("api")
-app = FastAPI(title="ValueBet Pilot", version="0.1.0")
+app = FastAPI(title="ValueBet Pilot", version="0.2.0")
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
 
 
 class SignalOut(BaseModel):
@@ -41,7 +64,12 @@ class SignalOut(BaseModel):
     target_odds: float
     edge: float
     recommended_stake: float
+    is_live: bool
+    max_bet: float | None
+    variables_complete: bool
     status: str
+    detected_at: str | None
+    event_start_time: str | None
 
 
 class PlaceIn(BaseModel):
@@ -49,18 +77,85 @@ class PlaceIn(BaseModel):
     slippage: float = 0.02
 
 
+class SignalUpdateIn(BaseModel):
+    recommended_stake: float | None = None
+    max_bet: float | None = None
+    is_live: bool | None = None
+    variables_complete: bool | None = None
+    note: str | None = None
+
+
+class SettleIn(BaseModel):
+    outcome: str  # won | lost | void
+
+
+class AccountIn(BaseModel):
+    name: str
+    bookmaker: str = "stoiximan"
+    percentage_share: float = 1.0
+    initial_deposit: float = 0.0
+
+
+class AccountUpdateIn(BaseModel):
+    name: str | None = None
+    bookmaker: str | None = None
+    percentage_share: float | None = None
+    initial_deposit: float | None = None
+    is_paused: bool | None = None
+
+
+class AccountNoteIn(BaseModel):
+    content: str
+
+
+class ReportParams(BaseModel):
+    date_from: str | None = None   # ISO date string
+    date_to: str | None = None
+    sport: str | None = None
+    status: str | None = None
+    bookmaker: str | None = None
+    include_dry_run: bool = True
+
+
+class ConfigUpdateIn(BaseModel):
+    edge_threshold: float | None = None
+    live_edge_threshold: float | None = None
+    kelly_fraction: float | None = None
+    max_stake: float | None = None
+    bankroll: float | None = None
+    max_event_exposure: float | None = None
+    placement_dry_run: bool | None = None
+    placement_require_approval: bool | None = None
+    require_confirmation: bool | None = None
+    poll_interval_live: int | None = None
+    poll_interval_prematch: int | None = None
+    allow_demo_fallback: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _to_out(s: Signal) -> SignalOut:
     return SignalOut(
-        id=s.id, event_id=s.event_id, selection=s.selection, sport=s.sport,
-        market_type=s.market_type, fair_prob=s.fair_prob, confirm_prob=s.confirm_prob,
-        target_odds=s.target_odds, edge=s.edge, recommended_stake=s.recommended_stake,
+        id=s.id,
+        event_id=s.event_id,
+        selection=s.selection,
+        sport=s.sport,
+        market_type=s.market_type,
+        fair_prob=s.fair_prob,
+        confirm_prob=s.confirm_prob,
+        target_odds=s.target_odds,
+        edge=s.edge,
+        recommended_stake=s.recommended_stake,
+        is_live=bool(s.is_live),
+        max_bet=s.max_bet,
+        variables_complete=bool(s.variables_complete),
         status=s.status,
+        detected_at=s.detected_at.isoformat() if s.detected_at else None,
+        event_start_time=s.event_start_time.isoformat() if s.event_start_time else None,
     )
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-def favicon():
-    return Response(status_code=204)
 
 
 def _db_backend() -> str:
@@ -69,6 +164,40 @@ def _db_backend() -> str:
         return get_engine().url.get_backend_name()
     except Exception as exc:  # noqa: BLE001
         return f"unavailable: {exc}"
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Startup / Shutdown
+# ---------------------------------------------------------------------------
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
+
+
+@app.on_event("shutdown")
+def _close_placers() -> None:
+    """Close the shared browser sessions so uvicorn reloads don't leak Chromium."""
+    try:
+        from ..engine.executor import PlacementRouter
+        PlacementRouter.shared().close_all()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("placer_shutdown_failed", error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 
 @app.get("/health")
@@ -81,8 +210,6 @@ def health() -> dict:
         "env": s.env,
         "dry_run": s.placement_dry_run,
         "require_approval": s.placement_require_approval,
-        # Surfaced because a scan that "works" while these are wrong is exactly
-        # how the app looks healthy while no bet reaches the bookmaker.
         "demo_fallback": s.allow_demo_fallback,
         "has_session_cookies": cookies.get("has_cookies", False),
         "cookie_age_hours": cookies.get("age_hours"),
@@ -90,15 +217,96 @@ def health() -> dict:
     }
 
 
-@app.on_event("shutdown")
-def _close_placers() -> None:
-    """Close the shared browser sessions so uvicorn reloads don't leak Chromium."""
-    try:
-        from ..engine.executor import PlacementRouter
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 
-        PlacementRouter.shared().close_all()
-    except Exception as exc:  # noqa: BLE001
-        log.warning("placer_shutdown_failed", error=str(exc))
+
+@app.get("/config")
+def get_config() -> dict:
+    """Return all editable configuration variables."""
+    s = get_settings()
+    return {
+        "edge_threshold": s.edge_threshold,
+        "live_edge_threshold": s.live_edge_threshold,
+        "confirmation_tolerance": s.confirmation_tolerance,
+        "max_live_latency_seconds": s.max_live_latency_seconds,
+        "max_prematch_latency_seconds": s.max_prematch_latency_seconds,
+        "min_total_matched": s.min_total_matched,
+        "min_liquidity": s.min_liquidity,
+        "max_spread": s.max_spread,
+        "require_confirmation": s.require_confirmation,
+        "favorite_min_prob": s.favorite_min_prob,
+        "kelly_fraction": s.kelly_fraction,
+        "max_stake": s.max_stake,
+        "max_event_exposure": s.max_event_exposure,
+        "bankroll": s.bankroll,
+        "poll_interval_live": s.poll_interval_live,
+        "poll_interval_prematch": s.poll_interval_prematch,
+        "placement_dry_run": s.placement_dry_run,
+        "placement_require_approval": s.placement_require_approval,
+        "allow_demo_fallback": s.allow_demo_fallback,
+        "placement_bookmaker": s.placement_bookmaker,
+        "sport_overrides": s.sport_overrides,
+    }
+
+
+@app.post("/cookies")
+def upload_cookies(cookies: list[dict[str, Any]]) -> dict:
+    """Upload raw JSON cookies from browser extension."""
+    from ..placement.session_store import save_raw_cookie_list
+    try:
+        count = save_raw_cookie_list(cookies)
+        return {"message": f"Successfully saved {count} cookies."}
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc))
+
+@app.delete("/cookies")
+def clear_cookies() -> dict:
+    """Delete saved cookies."""
+    from ..placement.session_store import delete_cookie_file
+    delete_cookie_file()
+    return {"message": "Cookies deleted."}
+
+@app.patch("/config")
+def patch_config(body: ConfigUpdateIn) -> dict:
+    """Update editable config variables (writes to .env file)."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        raise HTTPException(404, ".env file not found — create it first")
+
+    lines = env_path.read_text().splitlines()
+    updates: dict[str, Any] = {
+        k: v for k, v in body.model_dump().items() if v is not None
+    }
+    env_map = {k.upper(): str(v).lower() if isinstance(v, bool) else str(v)
+               for k, v in updates.items()}
+
+    new_lines = []
+    updated_keys = set()
+    for line in lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in env_map:
+                new_lines.append(f"{key}={env_map[key]}")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # Append any keys that weren't already in .env
+    for key, val in env_map.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}")
+
+    env_path.write_text("\n".join(new_lines) + "\n")
+    log.info("config_updated", updates=list(updates.keys()))
+    return {"updated": list(updates.keys()), "message": "Config saved to .env — restart to apply all changes"}
+
+
+# ---------------------------------------------------------------------------
+# Scan
+# ---------------------------------------------------------------------------
 
 
 @app.post("/scan")
@@ -116,7 +324,6 @@ def trigger_scan(sport: str = "all", live: bool = False) -> dict:
         try:
             sport_enum = Sport(sport)
         except ValueError:
-            # If an unknown sport key is passed, fallback to scanning all sports
             total = 0
             for sp in Sport:
                 try:
@@ -132,10 +339,52 @@ def trigger_scan(sport: str = "all", live: bool = False) -> dict:
         return {"new_signals": 0, "error": str(exc)}
 
 
+# ---------------------------------------------------------------------------
+# Signals
+# ---------------------------------------------------------------------------
+
+
 @app.get("/signals", response_model=list[SignalOut])
 def list_signals(status: str | None = None) -> list[SignalOut]:
     with session_scope() as session:
         return [_to_out(s) for s in open_signals(session, status)]
+
+
+@app.get("/signals/feed")
+async def signals_feed() -> StreamingResponse:
+    """Server-Sent Events endpoint — pushes new signals in real time.
+
+    Clients connect once and receive a continuous stream. Each event is a JSON
+    payload of the latest signal list. The stream never ends; failed bets are
+    filtered out on the client side (status=failed/cancelled).
+    """
+    async def _generator() -> AsyncIterator[str]:
+        last_ids: set[int] = set()
+        while True:
+            try:
+                with session_scope() as session:
+                    sigs = open_signals(session)
+                    # Send full list on first connection, then only deltas
+                    current_ids = {s.id for s in sigs}
+                    new_sigs = [_to_out(s) for s in sigs if s.id not in last_ids]
+                    if new_sigs or not last_ids:
+                        payload = json.dumps([s.model_dump() for s in [_to_out(s) for s in sigs]])
+                        yield f"data: {payload}\n\n"
+                        last_ids = current_ids
+            except Exception as exc:
+                log.warning("sse_error", error=str(exc))
+                yield f"event: error\ndata: {str(exc)}\n\n"
+            await asyncio.sleep(5)
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/signals/{signal_id}/approve")
@@ -151,7 +400,6 @@ def approve_signal(signal_id: int) -> dict:
             log.warning("approve_rejected_bad_state", signal_id=signal_id, status=sig.status)
             raise HTTPException(409, f"signal is '{sig.status}', cannot approve")
         sig.status = "approved"
-        # Approval is the gate that lets real money out; keep an audit trail.
         log.info("signal_approved", signal_id=signal_id, selection=sig.selection,
                  target_odds=sig.target_odds, recommended_stake=sig.recommended_stake,
                  edge=round(sig.edge, 4))
@@ -172,18 +420,39 @@ def reject_signal(signal_id: int) -> dict:
     return {"id": signal_id, "status": "rejected"}
 
 
+@app.post("/signals/{signal_id}/cancel")
+def cancel_signal_endpoint(signal_id: int) -> dict:
+    """Manually abort/cancel a signal and void its associated bet."""
+    with session_scope() as session:
+        sig = cancel_signal(session, signal_id)
+        if not sig:
+            raise HTTPException(404, "signal not found")
+    return {"id": signal_id, "status": "cancelled"}
+
+
+@app.patch("/signals/{signal_id}")
+def update_signal_endpoint(signal_id: int, body: SignalUpdateIn) -> dict:
+    """Update mutable fields on a signal (stake, max_bet, live flag, variables, note)."""
+    with session_scope() as session:
+        sig = update_signal(
+            session,
+            signal_id,
+            recommended_stake=body.recommended_stake,
+            max_bet=body.max_bet,
+            is_live=body.is_live,
+            variables_complete=body.variables_complete,
+            note=body.note,
+        )
+        if not sig:
+            raise HTTPException(404, "signal not found")
+        return _to_out(sig).model_dump()
+
+
 @app.post("/signals/{signal_id}/place")
-def place_bet(signal_id: int, body: PlaceIn) -> dict:
-    """Place the bet for an (approved) signal on Stoiximan.
-
-    Honours PLACEMENT_REQUIRE_APPROVAL and PLACEMENT_DRY_RUN from config. Placement
-    runs the Playwright worker; in dry-run it prepares the slip without committing.
-
-    The response distinguishes what actually happened at the bookmaker via
-    `status`, and `placed_on_platform` is true only when the bet was found in
-    Stoiximan's own open-bets list. `success` alone must not be read as "the bet
-    exists at the book" — a dry run succeeds without staking anything.
-    """
+def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
+    """Place the bet for an (approved) signal on Stoiximan."""
+    if body is None:
+        body = PlaceIn()
     s = get_settings()
     with session_scope() as session:
         sig = session.get(Signal, signal_id)
@@ -209,24 +478,19 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
             selection=sig.selection, target_odds=sig.target_odds,
             stake=sig.recommended_stake, min_odds=min_odds,
         )
-        # Lazy import keeps Playwright optional for non-placement deployments.
-        # The router owns one long-lived browser session; building a placer per
-        # request leaked a Chromium process and re-logged in on every click.
         from ..engine.executor import PlacementRouter
         from ..placement.base import PlacementStatus
 
         placer = PlacementRouter.shared().get_placer(s.placement_bookmaker)
         if placer is None:
             log.error("no_placer_configured", bookmaker=s.placement_bookmaker)
-            raise HTTPException(
-                501, f"no placer configured for '{s.placement_bookmaker}'"
-            )
+            raise HTTPException(501, f"no placer configured for '{s.placement_bookmaker}'")
         result = placer.place(request)
         log.info(
             "placement_completed",
             signal_id=signal_id,
             selection=sig.selection,
-            status=result.status.value,
+            status=result.status.value if result.status else "unknown",
             placed_on_platform=result.verified_on_platform,
             placed_odds=result.placed_odds,
             requested_stake=result.requested_stake,
@@ -240,8 +504,7 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
                 "signal_id": signal_id,
                 "bet_id": bet_id,
                 "success": result.success,
-                "status": result.status.value,
-                # The only field that means "this bet exists at the bookmaker".
+                "status": result.status.value if result.status else "unknown",
                 "placed_on_platform": result.verified_on_platform,
                 "needs_manual_check": result.needs_manual_check,
                 "dry_run": result.dry_run,
@@ -253,9 +516,6 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
             }
 
         if result.status == PlacementStatus.DRY_RUN:
-            # Nothing was staked. Keep the paper record, but mark the signal
-            # "paper" rather than "placed" so the dashboard cannot imply a bet
-            # exists at Stoiximan when none does.
             bet = record_bet(
                 session, sig,
                 placed_odds=result.placed_odds or sig.target_odds,
@@ -267,8 +527,6 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
             return payload(bet.id)
 
         if not result.is_real_bet:
-            # No bet was struck (price moved, automation error): leave the signal
-            # approved so it can be retried; record nothing.
             if result.status == PlacementStatus.REJECTED:
                 save_limit_event(
                     session, bookmaker=result.bookmaker,
@@ -280,13 +538,12 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
         bet = record_bet(
             session, sig,
             placed_odds=result.placed_odds or sig.target_odds,
-            stake=result.accepted_stake,              # Feature 3: accepted amount
-            requested_stake=result.requested_stake,  # Feature 3: what we asked
+            stake=result.accepted_stake,
+            requested_stake=result.requested_stake,
             dry_run=False, note=result.message,
             bookmaker=result.bookmaker,
             verified=result.verified_on_platform,
         )
-        # Feature 4: also persist limit event to DB
         save_limit_event(
             session,
             bookmaker=result.bookmaker,
@@ -302,8 +559,9 @@ def place_bet(signal_id: int, body: PlaceIn) -> dict:
         return payload(bet.id)
 
 
-class SettleIn(BaseModel):
-    outcome: str  # won | lost | void
+# ---------------------------------------------------------------------------
+# Bets (settlement)
+# ---------------------------------------------------------------------------
 
 
 @app.post("/bets/{bet_id}/settle")
@@ -336,16 +594,192 @@ def pnl() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+
+@app.get("/accounts")
+def get_accounts() -> list[dict]:
+    """List all customer accounts."""
+    with session_scope() as session:
+        accounts = list_accounts(session)
+        result = []
+        for acc in accounts:
+            # Compute quick stats for this account
+            activity = get_account_activity(session, acc.id)
+            result.append({
+                "id": acc.id,
+                "name": acc.name,
+                "bookmaker": acc.bookmaker,
+                "percentage_share": acc.percentage_share,
+                "initial_deposit": acc.initial_deposit,
+                "is_paused": acc.is_paused,
+                "created_at": acc.created_at.isoformat() if acc.created_at else None,
+                "total_bets": activity.get("total_bets", 0),
+                "net_profit": activity.get("net_profit", 0.0),
+                "roi": activity.get("roi", 0.0),
+            })
+        return result
+
+
+@app.post("/accounts")
+def create_account_endpoint(body: AccountIn) -> dict:
+    """Create a new customer account."""
+    with session_scope() as session:
+        acc = create_account(
+            session,
+            name=body.name,
+            bookmaker=body.bookmaker,
+            percentage_share=body.percentage_share,
+            initial_deposit=body.initial_deposit,
+        )
+        return {
+            "id": acc.id,
+            "name": acc.name,
+            "bookmaker": acc.bookmaker,
+            "percentage_share": acc.percentage_share,
+            "initial_deposit": acc.initial_deposit,
+            "is_paused": acc.is_paused,
+        }
+
+
+@app.get("/accounts/{account_id}")
+def get_account_detail(account_id: int) -> dict:
+    """Full account detail including bets and activity."""
+    with session_scope() as session:
+        acc = get_account(session, account_id)
+        if not acc:
+            raise HTTPException(404, "account not found")
+        return get_account_activity(session, account_id)
+
+
+@app.patch("/accounts/{account_id}")
+def update_account_endpoint(account_id: int, body: AccountUpdateIn) -> dict:
+    """Update a customer account (including pause/unpause)."""
+    with session_scope() as session:
+        acc = update_account(
+            session,
+            account_id,
+            name=body.name,
+            bookmaker=body.bookmaker,
+            percentage_share=body.percentage_share,
+            initial_deposit=body.initial_deposit,
+            is_paused=body.is_paused,
+        )
+        if not acc:
+            raise HTTPException(404, "account not found")
+        return {
+            "id": acc.id,
+            "name": acc.name,
+            "bookmaker": acc.bookmaker,
+            "percentage_share": acc.percentage_share,
+            "initial_deposit": acc.initial_deposit,
+            "is_paused": acc.is_paused,
+        }
+
+
+@app.get("/accounts/{account_id}/notes")
+def get_notes(account_id: int) -> list[dict]:
+    with session_scope() as session:
+        notes = list_account_notes(session, account_id)
+        return [{"id": n.id, "content": n.content,
+                 "created_at": n.created_at.isoformat()} for n in notes]
+
+
+@app.post("/accounts/{account_id}/notes")
+def add_note(account_id: int, body: AccountNoteIn) -> dict:
+    with session_scope() as session:
+        note = add_account_note(session, account_id, body.content)
+        if not note:
+            raise HTTPException(404, "account not found")
+        return {"id": note.id, "content": note.content,
+                "created_at": note.created_at.isoformat()}
+
+
+@app.delete("/accounts/{account_id}/notes/{note_id}")
+def delete_note(account_id: int, note_id: int) -> dict:
+    with session_scope() as session:
+        ok = delete_account_note(session, note_id)
+        if not ok:
+            raise HTTPException(404, "note not found")
+        return {"deleted": note_id}
+
+
+@app.get("/accounts/{account_id}/activity")
+def account_activity(account_id: int) -> dict:
+    with session_scope() as session:
+        acc = get_account(session, account_id)
+        if not acc:
+            raise HTTPException(404, "account not found")
+        return get_account_activity(session, account_id)
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+
+@app.post("/reports/generate")
+def reports_generate(body: ReportParams) -> list[dict]:
+    """Generate a report with optional date/sport/status filters."""
+    with session_scope() as session:
+        return generate_report(
+            session,
+            date_from=_parse_dt(body.date_from),
+            date_to=_parse_dt(body.date_to),
+            sport=body.sport or None,
+            status=body.status or None,
+            bookmaker=body.bookmaker or None,
+            include_dry_run=body.include_dry_run,
+        )
+
+
+@app.get("/reports/export")
+def reports_export(
+    format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    sport: str | None = None,
+    status: str | None = None,
+    bookmaker: str | None = None,
+    include_dry_run: bool = True,
+) -> Response:
+    """Export report as CSV or Excel with human-friendly column names."""
+    kwargs = dict(
+        date_from=_parse_dt(date_from),
+        date_to=_parse_dt(date_to),
+        sport=sport,
+        status=status,
+        bookmaker=bookmaker,
+        include_dry_run=include_dry_run,
+    )
+    with session_scope() as session:
+        if format == "xlsx":
+            data = export_xlsx(session, **kwargs)
+            filename = f"betting_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            return Response(
+                content=data,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        else:
+            data = export_csv(session, **kwargs)
+            filename = f"betting_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            return Response(
+                content=data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+
+# ---------------------------------------------------------------------------
 # Feature 4: Bookmaker Limit / Account Health endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/limits")
 def get_all_limits() -> list[dict]:
-    """Return stake-acceptance summary for all bookmakers.
-
-    An acceptance_rate below 0.70 with at least 5 bets indicates the account
-    is likely being limited and the operator should investigate.
-    """
+    """Return stake-acceptance summary for all bookmakers."""
     with session_scope() as session:
         return all_bookmaker_limit_summaries(session)
 
@@ -357,26 +791,23 @@ def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
         return bookmaker_limit_summary(session, bookmaker, last_n)
 
 
+# ---------------------------------------------------------------------------
+# Cookie management
+# ---------------------------------------------------------------------------
+
+
 @app.get("/cookie-status")
 def cookie_status() -> dict:
-    """Return whether Stoiximan session cookies are saved and how old they are."""
     from ..placement.session_store import get_cookie_status
     return get_cookie_status()
 
 
 class CookieImport(BaseModel):
-    cookies: list[dict]  # Array of cookie objects from Cookie-Editor / Playwright
+    cookies: list[dict]
 
 
 @app.post("/import-cookies")
 def import_cookies(body: CookieImport) -> dict:
-    """Import Stoiximan session cookies exported from the browser.
-
-    Use the 'Cookie-Editor' Chrome/Firefox extension or JSON array:
-    1. Log in to stoiximan.com.cy manually in your browser.
-    2. Click Cookie-Editor extension → Export → Export as JSON.
-    3. Paste the JSON array here.
-    """
     if not body.cookies:
         raise HTTPException(400, "cookies list is empty")
     from ..placement.session_store import save_raw_cookie_list
@@ -394,14 +825,12 @@ def import_cookies(body: CookieImport) -> dict:
 
 @app.get("/export-cookies")
 def export_cookies() -> list[dict]:
-    """Export current Stoiximan session cookies as JSON."""
     from ..placement.session_store import read_cookie_json
     return read_cookie_json()
 
 
 @app.delete("/import-cookies")
 def clear_cookies() -> dict:
-    """Clear saved Stoiximan cookies (forces re-login on next placement)."""
     from ..placement.session_store import delete_cookie_file
     deleted = delete_cookie_file()
     log.warning("cookies_cleared", deleted=deleted,
@@ -411,14 +840,23 @@ def clear_cookies() -> dict:
     return {"success": True, "message": "No cookie file found to delete."}
 
 
+# ---------------------------------------------------------------------------
+# Debug
+# ---------------------------------------------------------------------------
+
+
 @app.get("/debug/screenshot")
 def debug_screenshot():
-    """View the latest diagnostic screenshot from Stoiximan browser automation."""
     from fastapi.responses import FileResponse
     for p in [Path("data/navigate_failed.png"), Path("data/stoiximan_blocked.png")]:
         if p.exists():
             return FileResponse(p, media_type="image/png")
     raise HTTPException(404, "No screenshot available yet")
+
+
+# ---------------------------------------------------------------------------
+# Root — legacy HTML dashboard
+# ---------------------------------------------------------------------------
 
 
 @app.get("/", response_class=HTMLResponse)

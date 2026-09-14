@@ -19,6 +19,8 @@ dependencies = [
     "betfairlightweight>=2.20",
     "playwright>=1.43",
     "python-dotenv>=1.0",
+    "openpyxl>=3.1",
+    "sse-starlette>=1.8",
 ]
 
 [project.optional-dependencies]
