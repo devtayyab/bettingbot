@@ -31,8 +31,8 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
         log.info("using_the_odds_api_source")
         from .sources.the_odds_api import TheOddsAPISource
 
-        bf  = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
-        pin = TheOddsAPISource(target_bookmaker="pinnacle",      name="pinnacle")
+        bf: OddsSource = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
+        pin: OddsSource = TheOddsAPISource(target_bookmaker="pinnacle", name="pinnacle")
         # The target book's prices are read from ODDS_API_TARGET_BOOKMAKER but the
         # bet is placed on PLACEMENT_BOOKMAKER. When those are different books the
         # detected price does not exist on the site we bet into: the placement
@@ -47,11 +47,12 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
                 msg="signals are priced from a different book than the one we bet on; "
                     "placement will usually fail price protection",
             )
-        tgt = TheOddsAPISource(
+        tgt: OddsSource = TheOddsAPISource(
             target_bookmaker=s.odds_api_target_bookmaker,
             name=s.placement_bookmaker,
         )
 
+        stream: OddsSource
         try:
             from .sources.betfair_stream import BetfairStreamSource
             stream = BetfairStreamSource(bf)
@@ -62,30 +63,32 @@ def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSourc
 
     if not (have_betfair and have_pinnacle):
         log.warning("using_mock_sources", reason="missing Betfair/Pinnacle credentials")
-        betfair, pinnacle, stoiximan = demo_sources()
+        mock_bf, mock_pin, mock_stoiximan = demo_sources()
         from .sources.betfair_stream import BetfairStreamSource
-        return betfair, pinnacle, [stoiximan], BetfairStreamSource(betfair)
+        return mock_bf, mock_pin, [mock_stoiximan], BetfairStreamSource(mock_bf)
 
     from .sources.betfair import BetfairSource
     from .sources.betfair_stream import BetfairStreamSource
     from .sources.pinnacle import PinnacleSource
     from .sources.stoiximan import StoiximanSource
 
-    bf = BetfairSource()
-    targets = [StoiximanSource(headless=True)]
-    return bf, PinnacleSource(), targets, BetfairStreamSource(bf)
+    real_bf: OddsSource = BetfairSource()
+    real_targets: list[OddsSource] = [StoiximanSource(headless=True)]
+    return real_bf, PinnacleSource(), real_targets, BetfairStreamSource(real_bf)
 
 
 def run_scan(sport: Sport, live: bool = False) -> int:
     """One full scan cycle. Returns the number of NEW signals persisted (deduped)."""
     reference, confirmation, targets, stream = build_sources()
-    
-    # Start stream lazily on first live scan
-    if live and not stream._is_running:
-        try:
-            stream.start(sport)
-        except Exception:
-            pass
+
+    # Start stream lazily on first live scan if supported
+    if live and not getattr(stream, "_is_running", False):
+        start_fn = getattr(stream, "start", None)
+        if callable(start_fn):
+            try:
+                start_fn(sport)
+            except Exception:
+                pass
         
     actual_reference = stream if live else reference
     engine = ValueEngine(actual_reference, confirmation, targets)
