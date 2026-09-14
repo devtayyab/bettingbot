@@ -308,8 +308,11 @@ def patch_config(body: ConfigUpdateIn) -> dict:
             new_lines.append(f"{key}={val}")
 
     env_path.write_text("\n".join(new_lines) + "\n")
+    # Also apply to running process environment immediately
+    for key, val in env_map.items():
+        os.environ[key] = val
     log.info("config_updated", updates=list(updates.keys()))
-    return {"updated": list(updates.keys()), "message": "Config saved to .env — restart to apply all changes"}
+    return {"updated": list(updates.keys()), "message": "Config saved and applied"}
 
 
 # ---------------------------------------------------------------------------

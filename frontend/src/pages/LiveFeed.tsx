@@ -15,9 +15,6 @@ function formatEdge(edge: number) {
   return edge >= 0 ? `+${pct}%` : `${pct}%`;
 }
 
-function formatProb(p: number) {
-  return (p * 100).toFixed(1) + '%';
-}
 
 function formatDelta(fair: number, confirm: number | null) {
   if (confirm == null) return null;
@@ -193,6 +190,10 @@ export const LiveFeed: React.FC = () => {
           {filtered.map((s) => {
             const edgeClass = s.edge > 0.08 ? 'edge-high' : s.edge > 0.03 ? 'edge-medium' : 'edge-low';
             const delta = formatDelta(s.fair_prob, s.confirm_prob);
+            const winAccuracy = (s.fair_prob * 100).toFixed(1);
+            const potProfit = (s.recommended_stake * (s.target_odds - 1)).toFixed(2);
+            const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
+            const potLoss = s.recommended_stake.toFixed(2);
 
             return (
               <div key={s.id} className={`bet-card glass-panel ${s.is_live ? 'bet-card--live' : 'bet-card--prematch'}`}>
@@ -256,8 +257,8 @@ export const LiveFeed: React.FC = () => {
                   </div>
 
                   <div className="stat-item">
-                    <span className="stat-label">Fair Prob</span>
-                    <span className="stat-value">{formatProb(s.fair_prob)}</span>
+                    <span className="stat-label">Win Accuracy</span>
+                    <span className="stat-value" style={{ color: '#60a5fa' }}>{winAccuracy}%</span>
                     {delta && (
                       <span style={{ fontSize: '0.75rem', color: parseFloat(delta) >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
                         Conf Δ {delta}
@@ -271,15 +272,63 @@ export const LiveFeed: React.FC = () => {
                       €{s.recommended_stake.toFixed(2)}
                     </span>
                     <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      Stake {s.recommended_stake.toFixed(2)} on this selection
+                      Kelly stake sizing
                     </span>
                   </div>
 
                   <div className="stat-item">
-                    <span className="stat-label">Max Bet</span>
+                    <span className="stat-label">Max Bet Cap</span>
                     <span className="stat-value" style={{ color: s.max_bet ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                       {s.max_bet ? `€${s.max_bet.toFixed(2)}` : '—'}
                     </span>
+                  </div>
+                </div>
+
+                {/* Risk / Reward Breakdown: Accuracy, Win Profit, Potential Loss */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '10px 14px',
+                  marginBottom: '14px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '12px',
+                }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                      🎯 Win Chance / Accuracy
+                    </div>
+                    <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: '1.05rem' }}>
+                      {winAccuracy}%
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      Fair probability model
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                      🏆 Profit If Won
+                    </div>
+                    <div style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05rem' }}>
+                      +{potProfitPct}% (+€{potProfit})
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#10b981' }}>
+                      Net return on investment
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                      ⚠️ Loss If Lost
+                    </div>
+                    <div style={{ color: '#f87171', fontWeight: 700, fontSize: '1.05rem' }}>
+                      -100% (-€{potLoss})
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      Max risk = stake amount
+                    </div>
                   </div>
                 </div>
 

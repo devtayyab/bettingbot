@@ -497,6 +497,8 @@ EXPORT_COLUMN_LABELS: dict[str, str] = {
     "recommended_stake": "Recommended Stake",
     "requested_stake": "Stake Requested",
     "stake": "Stake Accepted",
+    "potential_profit": "Potential Win Profit",
+    "potential_loss": "Potential Loss",
     "outcome": "Outcome",
     "profit": "Net Profit / Loss",
     "actual_edge": "Actual Edge %",
@@ -544,6 +546,11 @@ def generate_report(
     results = []
     for sig, bet in rows:
         live_label = "Live" if sig.is_live else "Pre-Match"
+        effective_odds = (bet.placed_odds if bet and bet.placed_odds else sig.target_odds)
+        effective_stake = (bet.stake if bet and bet.stake else sig.recommended_stake)
+        pot_profit_val = round(effective_stake * (effective_odds - 1), 2)
+        pot_profit_pct = round((effective_odds - 1) * 100, 1)
+
         results.append({
             "signal_id": sig.id,
             "bet_id": bet.id if bet else None,
@@ -559,6 +566,8 @@ def generate_report(
             "recommended_stake": sig.recommended_stake,
             "requested_stake": bet.requested_stake if bet else None,
             "stake": bet.stake if bet else None,
+            "potential_profit": f"+{pot_profit_pct:.0f}% (+€{pot_profit_val:.2f})",
+            "potential_loss": f"-100% (-€{effective_stake:.2f})",
             "outcome": bet.outcome if bet else "no bet",
             "profit": bet.profit if bet else None,
             "actual_edge": f"{bet.actual_edge * 100:+.2f}%" if bet and bet.actual_edge else None,

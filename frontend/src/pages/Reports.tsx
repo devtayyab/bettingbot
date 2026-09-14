@@ -25,6 +25,8 @@ const COLUMN_LABELS: Record<string, string> = {
   recommended_stake: 'Recommended Stake',
   requested_stake: 'Stake Requested',
   stake: 'Stake Accepted',
+  potential_profit: 'Profit If Won',
+  potential_loss: 'Loss If Lost',
   outcome: 'Outcome',
   profit: 'Net Profit / Loss',
   actual_edge: 'Actual Edge %',
