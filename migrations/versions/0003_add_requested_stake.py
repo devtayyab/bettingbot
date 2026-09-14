@@ -14,18 +14,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("bets", sa.Column("requested_stake", sa.Float(), nullable=True))
-    op.create_table(
-        "bookmaker_limit_events",
-        sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
-        sa.Column("bookmaker", sa.String(32), index=True, nullable=False),
-        sa.Column("requested_stake", sa.Float(), nullable=False),
-        sa.Column("accepted_stake", sa.Float(), nullable=False),
-        sa.Column("acceptance_ratio", sa.Float(), nullable=False),
-        sa.Column("was_rejected", sa.Boolean(), server_default="false", nullable=False),
-        sa.Column("note", sa.String(512), nullable=True),
-        sa.Column("placed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True, nullable=False),
-    )
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    bet_cols = [c["name"] for c in insp.get_columns("bets")]
+    if "requested_stake" not in bet_cols:
+        op.add_column("bets", sa.Column("requested_stake", sa.Float(), nullable=True))
+
+    tables = insp.get_table_names()
+    if "bookmaker_limit_events" not in tables:
+        op.create_table(
+            "bookmaker_limit_events",
+            sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
+            sa.Column("bookmaker", sa.String(32), index=True, nullable=False),
+            sa.Column("requested_stake", sa.Float(), nullable=False),
+            sa.Column("accepted_stake", sa.Float(), nullable=False),
+            sa.Column("acceptance_ratio", sa.Float(), nullable=False),
+            sa.Column("was_rejected", sa.Boolean(), server_default="false", nullable=False),
+            sa.Column("note", sa.String(512), nullable=True),
+            sa.Column("placed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True, nullable=False),
+        )
 
 
 def downgrade() -> None:
