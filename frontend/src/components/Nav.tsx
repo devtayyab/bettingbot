@@ -7,6 +7,7 @@ interface NavProps {
 
 const NAV_ITEMS = [
   { id: 'feed', label: 'Live Feed', icon: '⚡' },
+  { id: 'results', label: 'Bet Results', icon: '🏆' },
   { id: 'accounts', label: 'Accounts', icon: '👥' },
   { id: 'reports', label: 'Reports', icon: '📊' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },

@@ -592,11 +592,81 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
             bet.profit = -bet.stake
         else:
             bet.profit = 0.0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean_note = bet.note or ""
+        if "settled_at:" in clean_note:
+            import re
+            clean_note = re.sub(r"settled_at:\S+\s*", "", clean_note).strip()
+        bet.note = f"settled_at:{now_iso} {clean_note}".strip()
         log.info("bet_settled", bet_id=bet_id, selection=bet.selection,
                  previous_outcome=previous, outcome=body.outcome,
                  stake=bet.stake, placed_odds=bet.placed_odds,
                  profit=bet.profit, dry_run=bet.dry_run)
-        return {"bet_id": bet_id, "outcome": body.outcome, "profit": bet.profit}
+        return {"bet_id": bet_id, "outcome": body.outcome, "profit": bet.profit, "settled_at": now_iso}
+
+
+@app.get("/results")
+def get_results(
+    outcome: str | None = None,
+    sport: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Return settled bets (Won and Lost) with signal generated time and settlement end time."""
+    with session_scope() as session:
+        from sqlalchemy import select
+        stmt = (
+            select(Bet, Signal)
+            .join(Signal, Bet.signal_id == Signal.id)
+            .order_by(Bet.placed_at.desc())
+        )
+        if outcome and outcome != "all":
+            stmt = stmt.where(Bet.outcome == outcome)
+        else:
+            stmt = stmt.where(Bet.outcome.in_(["won", "lost"]))
+        if sport and sport != "all":
+            stmt = stmt.where(Signal.sport == sport)
+        stmt = stmt.limit(limit)
+
+        rows = session.execute(stmt).all()
+        results = []
+        for bet, sig in rows:
+            settled_time_str = None
+            if bet.note and "settled_at:" in bet.note:
+                try:
+                    settled_time_str = bet.note.split("settled_at:")[1].split()[0]
+                except Exception:
+                    pass
+
+            profit_val = bet.profit if bet.profit is not None else 0.0
+            if bet.outcome == "won":
+                profit_pct = round(((bet.placed_odds - 1) * 100), 1)
+            elif bet.outcome == "lost":
+                profit_pct = -100.0
+            else:
+                profit_pct = 0.0
+
+            results.append({
+                "bet_id": bet.id,
+                "signal_id": sig.id,
+                "selection": bet.selection,
+                "sport": sig.sport,
+                "market_type": sig.market_type,
+                "is_live": bool(sig.is_live),
+                "placed_odds": bet.placed_odds,
+                "stake": bet.stake,
+                "outcome": bet.outcome,
+                "profit": profit_val,
+                "profit_pct": profit_pct,
+                "edge": sig.edge,
+                "fair_prob": sig.fair_prob,
+                "accuracy": round(sig.fair_prob * 100, 1),
+                "signal_generated_at": sig.detected_at.isoformat() if sig.detected_at else None,
+                "bet_placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
+                "end_time": settled_time_str or (bet.placed_at.isoformat() if bet.placed_at else None),
+                "bookmaker": bet.book,
+                "dry_run": bet.dry_run,
+            })
+        return results
 
 
 @app.get("/pnl")
