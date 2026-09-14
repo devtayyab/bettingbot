@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const API = '/api';
 
@@ -25,6 +25,8 @@ const COLUMN_LABELS: Record<string, string> = {
   recommended_stake: 'Recommended Stake',
   requested_stake: 'Stake Requested',
   stake: 'Stake Accepted',
+  potential_profit: 'Profit If Won',
+  potential_loss: 'Loss If Lost',
   outcome: 'Outcome',
   profit: 'Net Profit / Loss',
   actual_edge: 'Actual Edge %',
@@ -52,6 +54,7 @@ export const Reports: React.FC = () => {
   const [reportData, setReportData] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [settlingId, setSettlingId] = useState<number | null>(null);
 
   const buildParams = () => ({
     date_from: dateFrom || null,
@@ -75,6 +78,33 @@ export const Reports: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    generateReport();
+  }, []);
+
+  const handleSettle = async (betId: number, outcome: 'won' | 'lost' | 'void') => {
+    setSettlingId(betId);
+    try {
+      const res = await fetch(`${API}/bets/${betId}/settle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outcome }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReportData((prev) =>
+          prev.map((row) =>
+            row.bet_id === betId
+              ? { ...row, outcome, profit: data.profit }
+              : row
+          )
+        );
+      }
+    } finally {
+      setSettlingId(null);
     }
   };
 
@@ -108,6 +138,17 @@ export const Reports: React.FC = () => {
   };
 
   const columns = reportData.length > 0 ? Object.keys(reportData[0]) : [];
+
+  // Summary KPI Metrics
+  const bets = reportData.filter((r) => r.bet_id != null);
+  const totalBets = bets.length;
+  const wonBets = bets.filter((r) => r.outcome === 'won').length;
+  const lostBets = bets.filter((r) => r.outcome === 'lost').length;
+  const pendingBets = bets.filter((r) => r.outcome === 'pending').length;
+  const totalProfit = bets.reduce((acc, r) => acc + (typeof r.profit === 'number' ? r.profit : 0), 0);
+  const totalStaked = bets.reduce((acc, r) => acc + (typeof r.stake === 'number' ? r.stake : 0), 0);
+  const winRate = (wonBets + lostBets) > 0 ? ((wonBets / (wonBets + lostBets)) * 100).toFixed(1) : '0.0';
+  const roi = totalStaked > 0 ? ((totalProfit / totalStaked) * 100).toFixed(1) : '0.0';
 
   return (
     <div className="reports-page">
@@ -203,6 +244,38 @@ export const Reports: React.FC = () => {
         </div>
       </div>
 
+      {/* Summary KPI Cards for Paper Trading / Testing */}
+      {totalBets > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Tracked Bets</div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--brand-accent)' }}>{totalBets}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>{pendingBets} pending</div>
+          </div>
+          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Won / Lost</div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+              <span style={{ color: 'var(--accent-emerald, #10b981)' }}>{wonBets}</span> / <span style={{ color: 'var(--accent-rose, #ef4444)' }}>{lostBets}</span>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Win Rate: {winRate}%</div>
+          </div>
+          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Simulated Net Profit</div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: totalProfit >= 0 ? '#10b981' : '#ef4444' }}>
+              {totalProfit >= 0 ? `+${totalProfit.toFixed(2)}` : totalProfit.toFixed(2)}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Staked: {totalStaked.toFixed(2)}</div>
+          </div>
+          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Simulated ROI</div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: Number(roi) >= 0 ? '#10b981' : '#ef4444' }}>
+              {Number(roi) >= 0 ? `+${roi}%` : `${roi}%`}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Paper Trading Mode (No Risk)</div>
+          </div>
+        </div>
+      )}
+
       {/* Column Labels Legend */}
       {reportData.length > 0 && (
         <div className="glass-panel" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
@@ -233,6 +306,7 @@ export const Reports: React.FC = () => {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th style={{ minWidth: '130px' }}>Settle Bet</th>
                   {columns.map((col) => (
                     <th key={col} title={col}>
                       {COLUMN_LABELS[col] ?? col}
@@ -243,6 +317,36 @@ export const Reports: React.FC = () => {
               <tbody>
                 {reportData.slice(0, 100).map((row, i) => (
                   <tr key={i}>
+                    <td>
+                      {row.bet_id && row.outcome === 'pending' ? (
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)', padding: '2px 6px', fontSize: '0.75rem', borderRadius: '4px' }}
+                            disabled={settlingId === row.bet_id}
+                            title="Mark Won"
+                            onClick={() => handleSettle(row.bet_id as number, 'won')}
+                          >
+                            ✓ Won
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '2px 6px', fontSize: '0.75rem', borderRadius: '4px' }}
+                            disabled={settlingId === row.bet_id}
+                            title="Mark Lost"
+                            onClick={() => handleSettle(row.bet_id as number, 'lost')}
+                          >
+                            ✗ Lost
+                          </button>
+                        </div>
+                      ) : row.outcome === 'won' ? (
+                        <span className="pill" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontSize: '0.7rem' }}>WON</span>
+                      ) : row.outcome === 'lost' ? (
+                        <span className="pill" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', fontSize: '0.7rem' }}>LOST</span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{String(row.outcome || '—')}</span>
+                      )}
+                    </td>
                     {columns.map((col) => {
                       const val = row[col];
                       let display = val == null ? '—' : String(val);

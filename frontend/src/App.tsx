@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Nav } from './components/Nav';
 import { LiveFeed } from './pages/LiveFeed';
+import { Results } from './pages/Results';
 import { Accounts } from './pages/Accounts';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
@@ -103,6 +104,7 @@ function App() {
         {/* Page Content */}
         <div className="content-area">
           {page === 'feed' && <LiveFeed />}
+          {page === 'results' && <Results />}
           {page === 'accounts' && <Accounts />}
           {page === 'reports' && <Reports />}
           {page === 'settings' && <Settings />}

@@ -231,6 +231,32 @@ class StoiximanPlacer:
         return result
 
     def _place_impl(self, request: PlacementRequest, dry_run: bool) -> PlacementResult:
+        if dry_run:
+            # Paper trading / dry-run mode: record simulated bet immediately without requiring
+            # Playwright, Chromium, or active bookmaker login session.
+            sim_msg = (
+                f"DRY-RUN: simulated paper bet recorded at {request.target_odds} "
+                "(zero risk — no real money placed)"
+            )
+            log.info(
+                "placement_dry_run_simulated",
+                selection=request.selection,
+                odds=request.target_odds,
+                stake=request.stake,
+                note=sim_msg,
+            )
+            return PlacementResult(
+                success=True,
+                placed_odds=request.target_odds,
+                requested_stake=request.stake,
+                accepted_stake=request.stake,
+                dry_run=True,
+                message=sim_msg,
+                bookmaker=BOOKMAKER_NAME,
+                status=PlacementStatus.DRY_RUN,
+                verified_on_platform=False,
+            )
+
         try:
             self._ensure_session()
         except Exception as exc:
@@ -445,7 +471,7 @@ class StoiximanPlacer:
                 "--start-maximized",
             ]
         )
-        context_kwargs = {
+        context_kwargs: dict[str, typing.Any] = {
             "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -794,7 +820,7 @@ class StoiximanPlacer:
             "placement_attempt_finished",
             bookmaker=result.bookmaker,
             selection=request.selection,
-            status=result.status.value,
+            status=result.status.value if result.status else "unknown",
             verified_on_platform=result.verified_on_platform,
             placed_odds=result.placed_odds,
             requested_stake=result.requested_stake,
