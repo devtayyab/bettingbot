@@ -8,8 +8,11 @@ interface ResultItem {
   selection: string;
   sport: string;
   market_type: string;
+  bet_type?: string;
   is_live: boolean;
   placed_odds: number;
+  betfair_odds?: number | null;
+  pinnacle_odds?: number | null;
   stake: number;
   outcome: 'won' | 'lost' | 'void';
   profit: number;
@@ -233,8 +236,15 @@ export const Results: React.FC = () => {
                       </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{r.selection}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {r.market_type} {r.dry_run ? '• Paper Bet' : ''}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
+                          {r.bet_type && (
+                            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc', fontSize: '0.65rem' }}>
+                              {r.bet_type}
+                            </span>
+                          )}
+                          <span>{r.market_type}</span>
+                          <span>• Platform: <strong>{r.bookmaker ? r.bookmaker.toUpperCase() : 'STOIXIMAN'}</strong></span>
+                          {r.dry_run ? '• Paper Bet' : ''}
                         </div>
                       </td>
                       <td>
@@ -242,20 +252,22 @@ export const Results: React.FC = () => {
                       </td>
                       <td>
                         <span style={{ color: '#60a5fa', fontWeight: 600 }}>
-                          {r.accuracy}%
+                          {r.accuracy.toFixed(1).replace('.', ',')}%
                         </span>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          Edge: +{(r.edge * 100).toFixed(2)}%
+                          Edge: +{(r.edge * 100).toFixed(2).replace('.', ',')}%
                         </div>
                       </td>
-                      <td style={{ fontWeight: 600 }}>{r.placed_odds.toFixed(2)}</td>
-                      <td>€{r.stake.toFixed(2)}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {r.placed_odds.toFixed(2).replace('.', ',')}
+                      </td>
+                      <td>€{r.stake.toFixed(2).replace('.', ',')}</td>
                       <td>
                         <div style={{ fontWeight: 700, color: isWon ? '#34d399' : '#f87171' }}>
-                          {isWon ? `+€${r.profit.toFixed(2)}` : `-€${Math.abs(r.profit).toFixed(2)}`}
+                          {isWon ? `+€${r.profit.toFixed(2).replace('.', ',')}` : `-€${Math.abs(r.profit).toFixed(2).replace('.', ',')}`}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: isWon ? '#10b981' : '#ef4444' }}>
-                          {isWon ? `+${r.profit_pct}%` : `${r.profit_pct}%`}
+                          {isWon ? `+${r.profit_pct.toFixed(0)}%` : `${r.profit_pct.toFixed(0)}%`}
                         </div>
                       </td>
                       <td>

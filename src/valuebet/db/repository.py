@@ -487,16 +487,23 @@ EXPORT_COLUMN_LABELS: dict[str, str] = {
     "bet_id": "Bet ID",
     "selection": "Bet Selection",
     "sport": "Sport",
+    "bet_type": "Bet Type",
     "market_type": "Market Type",
     "is_live": "Live / Pre-Match",
+    "target_bookmaker": "Platform (Stoiximan)",
+    "target_odds": "Target Odds (Stoiximan)",
+    "betfair_odds": "Betfair Exchange Odds",
+    "pinnacle_odds": "Pinnacle Odds",
     "edge": "Edge %",
     "fair_prob": "Fair Probability",
     "confirm_prob": "Confirmation Probability",
-    "target_odds": "Target Odds",
     "placed_odds": "Odds at Placement",
     "recommended_stake": "Recommended Stake",
     "requested_stake": "Stake Requested",
     "stake": "Stake Accepted",
+    "account_name": "Client / Player Name",
+    "allocated_stake": "Player Stake Share",
+    "player_profit": "Player Net Profit / Loss",
     "potential_profit": "Potential Win Profit",
     "potential_loss": "Potential Loss",
     "outcome": "Outcome",
@@ -506,7 +513,6 @@ EXPORT_COLUMN_LABELS: dict[str, str] = {
     "dry_run": "Paper Bet (Dry Run)",
     "detected_at": "Bet Identified At",
     "placed_at": "Bet Placed At",
-    "bookmaker": "Bookmaker",
     "status": "Signal Status",
     "max_bet": "Max Bet Available",
     "variables_complete": "All Variables Available",
@@ -522,6 +528,7 @@ def generate_report(
     status: str | None = None,
     bookmaker: str | None = None,
     include_dry_run: bool = True,
+    account_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Query bets+signals with optional filters and return list of dicts."""
     stmt = (
@@ -542,6 +549,8 @@ def generate_report(
     if not include_dry_run:
         stmt = stmt.where((Bet.dry_run.is_(False)) | (Bet.id.is_(None)))
 
+    acc = session.get(Account, account_id) if account_id else None
+
     rows = session.execute(stmt).all()
     results = []
     for sig, bet in rows:
@@ -551,21 +560,57 @@ def generate_report(
         pot_profit_val = round(effective_stake * (effective_odds - 1), 2)
         pot_profit_pct = round((effective_odds - 1) * 100, 1)
 
-        results.append({
+        bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
+        pin_odds = round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None
+
+        mt = (sig.market_type or "").lower()
+        sel = (sig.selection or "").lower()
+        if "penalty" in mt or "penalties" in mt or "penalty" in sel:
+            btype = "Penalties"
+        elif "card" in mt or "booking" in mt or "card" in sel:
+            btype = "Cards"
+        elif "corner" in mt or "corner" in sel:
+            btype = "Corners"
+        elif "over" in mt or "under" in mt or "total" in mt:
+            btype = "Over/Under"
+        elif "handicap" in mt or "asian" in mt:
+            btype = "Handicap"
+        elif "btts" in mt or "both teams" in mt:
+            btype = "Both Teams to Score"
+        elif any(k in mt for k in ("h2h", "1x2", "winner", "moneyline", "match")):
+            btype = "Match Winner (1X2)"
+        else:
+            btype = sig.market_type.replace("_", " ").title() if sig.market_type else "Match Winner"
+
+        row_dict: dict[str, Any] = {
             "signal_id": sig.id,
             "bet_id": bet.id if bet else None,
             "selection": sig.selection,
             "sport": sig.sport,
+            "bet_type": btype,
             "market_type": sig.market_type,
             "is_live": live_label,
+            "target_bookmaker": bet.book if bet and bet.book else "stoiximan",
+            "target_odds": sig.target_odds,
+            "betfair_odds": bf_odds,
+            "pinnacle_odds": pin_odds,
             "edge": f"{sig.edge * 100:+.2f}%",
             "fair_prob": f"{sig.fair_prob * 100:.2f}%",
             "confirm_prob": f"{sig.confirm_prob * 100:.2f}%" if sig.confirm_prob else "—",
-            "target_odds": sig.target_odds,
             "placed_odds": bet.placed_odds if bet else None,
             "recommended_stake": sig.recommended_stake,
             "requested_stake": bet.requested_stake if bet else None,
             "stake": bet.stake if bet else None,
+        }
+
+        if acc:
+            client_stake = round(effective_stake * acc.percentage_share, 2)
+            client_profit = round(bet.profit * acc.percentage_share, 2) if bet and bet.profit is not None else None
+            row_dict["account_name"] = acc.name
+            row_dict["allocated_stake"] = client_stake
+            row_dict["player_profit"] = client_profit
+
+        row_dict.update({
             "potential_profit": f"+{pot_profit_pct:.0f}% (+€{pot_profit_val:.2f})",
             "potential_loss": f"-100% (-€{effective_stake:.2f})",
             "outcome": bet.outcome if bet else "no bet",
@@ -575,11 +620,11 @@ def generate_report(
             "dry_run": bet.dry_run if bet else None,
             "detected_at": sig.detected_at.strftime("%Y-%m-%d %H:%M:%S") if sig.detected_at else None,
             "placed_at": bet.placed_at.strftime("%Y-%m-%d %H:%M:%S") if bet and bet.placed_at else None,
-            "bookmaker": bet.book if bet else None,
             "status": sig.status,
             "max_bet": sig.max_bet,
             "variables_complete": "Yes" if sig.variables_complete else "No",
         })
+        results.append(row_dict)
     return results
 
 
