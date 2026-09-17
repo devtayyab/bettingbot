@@ -17,6 +17,10 @@ export interface SignalData {
   status: string;
   detected_at: string | null;
   event_start_time: string | null;
+  betfair_odds?: number | null;
+  pinnacle_odds?: number | null;
+  target_bookmaker?: string;
+  bet_type?: string | null;
 }
 
 interface UseFeedReturn {

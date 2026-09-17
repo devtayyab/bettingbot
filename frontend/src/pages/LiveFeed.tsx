@@ -10,16 +10,27 @@ const SPORTS = [
   'mma', 'boxing', 'volleyball', 'handball', 'darts', 'esports', 'table_tennis',
 ];
 
-function formatEdge(edge: number) {
-  const pct = (edge * 100).toFixed(2);
-  return edge >= 0 ? `+${pct}%` : `${pct}%`;
+// European style decimal formatting (uses comma separator: 2,25)
+function formatEuropeanOdds(odds: number | null | undefined): string {
+  if (odds == null || isNaN(odds) || odds <= 0) return '—';
+  return odds.toFixed(2).replace('.', ',');
 }
 
+function formatEuropeanCurrency(val: number | null | undefined): string {
+  if (val == null || isNaN(val)) return '—';
+  return '€' + val.toFixed(2).replace('.', ',');
+}
+
+function formatEdge(edge: number) {
+  const pct = (edge * 100).toFixed(2).replace('.', ',');
+  return edge >= 0 ? `+${pct}%` : `${pct}%`;
+}
 
 function formatDelta(fair: number, confirm: number | null) {
   if (confirm == null) return null;
   const diff = (confirm - fair) * 100;
-  return diff >= 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
+  const formatted = diff.toFixed(1).replace('.', ',');
+  return diff >= 0 ? `+${formatted}%` : `${formatted}%`;
 }
 
 function formatTime(iso: string | null) {
@@ -41,6 +52,29 @@ function formatDateTime(iso: string | null) {
   }
 }
 
+function getBetTypeBadge(betType?: string | null, marketType?: string, selection?: string) {
+  const t = (betType || marketType || selection || '').toLowerCase();
+  if (t.includes('penalty') || t.includes('penalties')) {
+    return { label: 'Penalties', icon: '🎯', color: '#f43f5e', bg: 'rgba(244,63,94,0.14)', border: 'rgba(244,63,94,0.3)' };
+  }
+  if (t.includes('card') || t.includes('booking') || t.includes('red') || t.includes('yellow')) {
+    return { label: 'Cards / Bookings', icon: '🟨', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.3)' };
+  }
+  if (t.includes('corner')) {
+    return { label: 'Corners', icon: '⛳', color: '#06b6d4', bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.3)' };
+  }
+  if (t.includes('over') || t.includes('under') || t.includes('total')) {
+    return { label: 'Totals (Over/Under)', icon: '📈', color: '#a855f7', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.3)' };
+  }
+  if (t.includes('handicap') || t.includes('asian')) {
+    return { label: 'Handicap', icon: '⚖️', color: '#fb923c', bg: 'rgba(251,146,60,0.14)', border: 'rgba(251,146,60,0.3)' };
+  }
+  if (t.includes('btts') || t.includes('both')) {
+    return { label: 'Both Teams To Score', icon: '🤝', color: '#10b981', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.3)' };
+  }
+  return { label: betType || 'Match Winner (1X2)', icon: '⚽', color: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.3)' };
+}
+
 function useToast() {
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: string }[]>([]);
   const add = (msg: string, type = 'info') => {
@@ -57,6 +91,7 @@ export const LiveFeed: React.FC = () => {
   const [localSignals, setLocalSignals] = useState<Map<number, Partial<SignalData>>>(new Map());
   const [sportFilter, setSportFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const { toasts, toast } = useToast();
 
   const mergedSignals = signals.map((s) => ({
@@ -70,6 +105,23 @@ export const LiveFeed: React.FC = () => {
     if (marketFilter === 'prematch' && s.is_live) return false;
     return true;
   });
+
+  const toggleExpand = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setExpandedIds(new Set(filtered.map((s) => s.id)));
+  };
+
+  const collapseAll = () => {
+    setExpandedIds(new Set());
+  };
 
   const doAction = async (id: number, action: string) => {
     try {
@@ -130,7 +182,7 @@ export const LiveFeed: React.FC = () => {
         <div>
           <h1 className="page-title text-gradient">Live Betting Feed</h1>
           <p className="page-subtitle">
-            Real-time value signals — new bets appear automatically
+            Real-time value signals — European style odds &amp; multi-bookmaker benchmark comparison
           </p>
         </div>
         <div className="feed-status">
@@ -143,7 +195,7 @@ export const LiveFeed: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Toolbar / Filters */}
       <div className="feed-toolbar glass-panel">
         <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
           <select
@@ -166,16 +218,30 @@ export const LiveFeed: React.FC = () => {
               <option key={s} value={s}>{s.replace('_', ' ')}</option>
             ))}
           </select>
+
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={expandedIds.size === filtered.length && filtered.length > 0 ? collapseAll : expandAll}
+            title="Toggle between compact summary and detailed stake/risk view"
+            style={{ marginLeft: 'auto' }}
+          >
+            {expandedIds.size === filtered.length && filtered.length > 0
+              ? '▲ Collapse All Details'
+              : '▼ Expand All Details'}
+          </button>
         </div>
 
-          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="pill pill-live" style={{ fontSize: '0.7rem' }}>LIVE</span>
-            <span>= In-play bet</span>
-            <span style={{ marginLeft: '12px' }}>
-              <span className="pill pill-prematch" style={{ fontSize: '0.7rem' }}>PRE-MATCH</span>
-            </span>
-            <span>= Pre-market bet</span>
-          </div>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span className="pill pill-live" style={{ fontSize: '0.7rem' }}>LIVE</span>
+          <span>= In-play</span>
+          <span style={{ marginLeft: '8px' }}>
+            <span className="pill pill-prematch" style={{ fontSize: '0.7rem' }}>PRE-MATCH</span>
+          </span>
+          <span>= Pre-match</span>
+          <span style={{ marginLeft: '12px', color: 'var(--text-secondary)' }}>
+            💡 Tip: Click any bet card to reveal recommended stake, profit/loss risk and action controls.
+          </span>
+        </div>
       </div>
 
       {/* Signal Cards */}
@@ -188,154 +254,96 @@ export const LiveFeed: React.FC = () => {
       ) : (
         <div className="bet-cards">
           {filtered.map((s) => {
+            const isExpanded = expandedIds.has(s.id);
             const edgeClass = s.edge > 0.08 ? 'edge-high' : s.edge > 0.03 ? 'edge-medium' : 'edge-low';
             const delta = formatDelta(s.fair_prob, s.confirm_prob);
-            const winAccuracy = (s.fair_prob * 100).toFixed(1);
-            const potProfit = (s.recommended_stake * (s.target_odds - 1)).toFixed(2);
+            const winAccuracy = (s.fair_prob * 100).toFixed(1).replace('.', ',');
+            const potProfitVal = (s.recommended_stake * (s.target_odds - 1));
             const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
-            const potLoss = s.recommended_stake.toFixed(2);
+            const betTypeInfo = getBetTypeBadge(s.bet_type, s.market_type, s.selection);
+
+            // Compute Betfair and Pinnacle odds
+            const bfOddsVal = s.betfair_odds ?? (s.fair_prob > 0 ? 1.0 / s.fair_prob : null);
+            const pinOddsVal = s.pinnacle_odds ?? (s.confirm_prob && s.confirm_prob > 0 ? 1.0 / s.confirm_prob : null);
 
             return (
-              <div key={s.id} className={`bet-card glass-panel ${s.is_live ? 'bet-card--live' : 'bet-card--prematch'}`}>
-                {/* Card Top Row */}
+              <div
+                key={s.id}
+                className={`bet-card glass-panel bet-card--interactive ${s.is_live ? 'bet-card--live' : 'bet-card--prematch'}`}
+                onClick={() => toggleExpand(s.id)}
+              >
+                {/* Header: Badges & Edge */}
                 <div className="bet-card__header">
                   <div className="bet-card__badges">
                     {s.is_live
                       ? <span className="pill pill-live">LIVE</span>
                       : <span className="pill pill-prematch">PRE-MATCH</span>
                     }
+                    {/* Bet Type Badge */}
+                    <span
+                      className="pill"
+                      style={{
+                        background: betTypeInfo.bg,
+                        color: betTypeInfo.color,
+                        border: `1px solid ${betTypeInfo.border}`,
+                        fontWeight: 600,
+                      }}
+                      title={`Market Category: ${betTypeInfo.label}`}
+                    >
+                      {betTypeInfo.icon} {betTypeInfo.label}
+                    </span>
+
                     <span className={`pill pill-status-${s.status}`}>{s.status}</span>
-                    {!s.variables_complete && (
-                      <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
-                        ⚠️ Missing Data
-                      </span>
-                    )}
-                    {s.variables_complete && (
-                      <span className="pill" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', fontSize: '0.7rem' }}>
-                        ✅ All Variables
-                      </span>
-                    )}
                   </div>
 
-                  <div className="bet-card__actions">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className={`stat-value ${edgeClass}`} style={{ fontSize: '1.05rem', fontWeight: 700 }}>
+                      {formatEdge(s.edge)}
+                    </span>
                     <button
                       className="btn btn-ghost btn-sm btn-icon"
-                      title="Edit bet variables"
-                      onClick={() => setEditSignal(s)}
-                    >✏️</button>
-                    {(s.status === 'detected' || s.status === 'approved') && (
-                      <button
-                        className="btn btn-danger btn-sm"
-                        title="Cancel this bet"
-                        onClick={() => doCancel(s.id)}
-                      >✖ Cancel</button>
-                    )}
+                      style={{ padding: '2px 6px', fontSize: '0.75rem', height: '26px' }}
+                      title={isExpanded ? 'Collapse details' : 'Expand details'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleExpand(s.id);
+                      }}
+                    >
+                      {isExpanded ? '▲' : '▼'}
+                    </button>
                   </div>
                 </div>
 
-                {/* Selection */}
-                <div className="bet-card__selection">
+                {/* Actual Bet Selection */}
+                <div className="bet-card__selection" style={{ fontSize: '1.15rem' }}>
                   {s.selection}
                 </div>
-                <div className="bet-card__meta">
+
+                <div className="bet-card__meta" style={{ marginBottom: '8px' }}>
                   <span className="bet-card__sport">{s.sport.replace('_', ' ')}</span>
                   <span className="bet-card__market">{s.market_type}</span>
                 </div>
 
-                {/* Key Stats Grid */}
-                <div className="bet-card__stats">
-                  <div className="stat-item">
-                    <span className="stat-label">Edge</span>
-                    <span className={`stat-value ${edgeClass}`} style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                      {formatEdge(s.edge)}
-                    </span>
+                {/* Bookmaker European Odds Comparison Bar */}
+                <div className="bookmaker-bar">
+                  <div className="bm-badge bm-badge--stoiximan" title="Target Placement Platform">
+                    <span>🎯 Stoiximan:</span>
+                    <span style={{ fontSize: '0.95rem' }}>{formatEuropeanOdds(s.target_odds)}</span>
                   </div>
-
-                  <div className="stat-item">
-                    <span className="stat-label">Target Odds</span>
-                    <span className="stat-value">{s.target_odds.toFixed(2)}</span>
+                  <div className="bm-badge bm-badge--ref" title="Betfair Exchange Fair Odds">
+                    <span>Betfair:</span>
+                    <strong>{formatEuropeanOdds(bfOddsVal)}</strong>
                   </div>
-
-                  <div className="stat-item">
-                    <span className="stat-label">Win Accuracy</span>
-                    <span className="stat-value" style={{ color: '#60a5fa' }}>{winAccuracy}%</span>
-                    {delta && (
-                      <span style={{ fontSize: '0.75rem', color: parseFloat(delta) >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
-                        Conf Δ {delta}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="stat-item">
-                    <span className="stat-label">Recommended Stake</span>
-                    <span className="stat-value" style={{ color: 'var(--brand-accent)' }}>
-                      €{s.recommended_stake.toFixed(2)}
-                    </span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      Kelly stake sizing
-                    </span>
-                  </div>
-
-                  <div className="stat-item">
-                    <span className="stat-label">Max Bet Cap</span>
-                    <span className="stat-value" style={{ color: s.max_bet ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                      {s.max_bet ? `€${s.max_bet.toFixed(2)}` : '—'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Risk / Reward Breakdown: Accuracy, Win Profit, Potential Loss */}
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '10px 14px',
-                  marginBottom: '14px',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                  gap: '12px',
-                }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                      🎯 Win Chance / Accuracy
-                    </div>
-                    <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: '1.05rem' }}>
-                      {winAccuracy}%
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      Fair probability model
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                      🏆 Profit If Won
-                    </div>
-                    <div style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05rem' }}>
-                      +{potProfitPct}% (+€{potProfit})
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: '#10b981' }}>
-                      Net return on investment
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                      ⚠️ Loss If Lost
-                    </div>
-                    <div style={{ color: '#f87171', fontWeight: 700, fontSize: '1.05rem' }}>
-                      -100% (-€{potLoss})
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      Max risk = stake amount
-                    </div>
+                  <div className="bm-badge bm-badge--ref" title="Pinnacle Sharp Bookmaker Odds">
+                    <span>Pinnacle:</span>
+                    <strong>{formatEuropeanOdds(pinOddsVal)}</strong>
                   </div>
                 </div>
 
                 {/* Timestamps */}
-                <div className="bet-card__timestamps">
+                <div className="bet-card__timestamps" style={{ margin: '6px 0 0 0', padding: '6px 0 0 0' }}>
                   <span title="When the bet opportunity was identified">
-                    🔍 Identified: {formatDateTime(s.detected_at)}
+                    🔍 Found: {formatDateTime(s.detected_at)}
                   </span>
                   {s.event_start_time && (
                     <span title="Event start time">
@@ -344,24 +352,147 @@ export const LiveFeed: React.FC = () => {
                   )}
                 </div>
 
-                {/* Action Buttons */}
-                {(s.status === 'detected' || s.status === 'approved') && (
-                  <div className="bet-card__footer">
-                    {s.status === 'detected' && (
-                      <>
-                        <button className="btn btn-success btn-sm" onClick={() => doAction(s.id, 'approve')}>
-                          ✓ Approve
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => doAction(s.id, 'reject')}>
-                          ✗ Reject
-                        </button>
-                      </>
-                    )}
-                    {s.status === 'approved' && (
-                      <button className="btn btn-primary btn-sm" onClick={() => doAction(s.id, 'place')}>
-                        💰 Place Bet
+                {/* Click to expand/collapse prompt */}
+                <div className="expand-toggle-indicator">
+                  <span>{isExpanded ? '▲ Click to hide details' : '▼ Click to view stake, risk & actions'}</span>
+                </div>
+
+                {/* Expandable Details Drawer */}
+                {isExpanded && (
+                  <div
+                    className="bet-card__details-drawer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Key Stats Grid */}
+                    <div className="bet-card__stats">
+                      <div className="stat-item">
+                        <span className="stat-label">Recommended Stake</span>
+                        <span className="stat-value" style={{ color: 'var(--brand-accent)', fontSize: '1.1rem' }}>
+                          {formatEuropeanCurrency(s.recommended_stake)}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          Kelly sizing
+                        </span>
+                      </div>
+
+                      <div className="stat-item">
+                        <span className="stat-label">Win Accuracy</span>
+                        <span className="stat-value" style={{ color: '#60a5fa', fontSize: '1.1rem' }}>
+                          {winAccuracy}%
+                        </span>
+                        {delta && (
+                          <span style={{ fontSize: '0.75rem', color: parseFloat(delta) >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
+                            Conf Δ {delta}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="stat-item">
+                        <span className="stat-label">Max Bet Cap</span>
+                        <span className="stat-value" style={{ color: s.max_bet ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '1.1rem' }}>
+                          {s.max_bet ? formatEuropeanCurrency(s.max_bet) : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Risk / Reward Breakdown */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '10px 14px',
+                      marginBottom: '14px',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                      gap: '12px',
+                    }}>
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                          🎯 Win Chance / Model
+                        </div>
+                        <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: '1.05rem' }}>
+                          {winAccuracy}%
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          De-vigged fair probability
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                          🏆 Profit If Won
+                        </div>
+                        <div style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05rem' }}>
+                          +{potProfitPct}% (+{formatEuropeanCurrency(potProfitVal)})
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#10b981' }}>
+                          Net return on stake
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                          ⚠️ Loss If Lost
+                        </div>
+                        <div style={{ color: '#f87171', fontWeight: 700, fontSize: '1.05rem' }}>
+                          -100% (-{formatEuropeanCurrency(s.recommended_stake)})
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          Max risk = stake amount
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quality Badges */}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      {!s.variables_complete && (
+                        <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
+                          ⚠️ Missing Data
+                        </span>
+                      )}
+                      {s.variables_complete && (
+                        <span className="pill" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', fontSize: '0.7rem' }}>
+                          ✅ All Variables Complete
+                        </span>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginLeft: 'auto' }}
+                        title="Edit stake, cap, or variables"
+                        onClick={() => setEditSignal(s)}
+                      >
+                        ✏️ Edit Bet
                       </button>
-                    )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="bet-card__footer">
+                      {s.status === 'detected' && (
+                        <>
+                          <button className="btn btn-success btn-sm" onClick={() => doAction(s.id, 'approve')}>
+                            ✓ Approve
+                          </button>
+                          <button className="btn btn-danger btn-sm" onClick={() => doAction(s.id, 'reject')}>
+                            ✗ Reject
+                          </button>
+                        </>
+                      )}
+                      {s.status === 'approved' && (
+                        <button className="btn btn-primary btn-sm" onClick={() => doAction(s.id, 'place')}>
+                          💰 Place Bet on Stoiximan
+                        </button>
+                      )}
+                      {(s.status === 'detected' || s.status === 'approved') && (
+                        <button
+                          className="btn btn-danger btn-sm"
+                          style={{ marginLeft: 'auto' }}
+                          title="Cancel this bet"
+                          onClick={() => doCancel(s.id)}
+                        >
+                          ✖ Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

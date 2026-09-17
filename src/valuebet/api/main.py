@@ -79,6 +79,10 @@ class SignalOut(BaseModel):
     status: str
     detected_at: str | None
     event_start_time: str | None
+    betfair_odds: float | None = None
+    pinnacle_odds: float | None = None
+    target_bookmaker: str = "stoiximan"
+    bet_type: str | None = None
 
 
 class PlaceIn(BaseModel):
@@ -124,6 +128,7 @@ class ReportParams(BaseModel):
     status: str | None = None
     bookmaker: str | None = None
     include_dry_run: bool = True
+    account_id: int | None = None
 
 
 class ConfigUpdateIn(BaseModel):
@@ -150,7 +155,31 @@ class OddsApiKeyIn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _classify_bet_type(market_type: str | None, selection: str | None) -> str:
+    mt = (market_type or "").lower()
+    sel = (selection or "").lower()
+    if "penalty" in mt or "penalties" in mt or "penalty" in sel:
+        return "Penalties"
+    if "card" in mt or "booking" in mt or "card" in sel:
+        return "Cards"
+    if "corner" in mt or "corner" in sel:
+        return "Corners"
+    if "over" in mt or "under" in mt or "total" in mt:
+        return "Over/Under"
+    if "handicap" in mt or "asian" in mt:
+        return "Handicap"
+    if "btts" in mt or "both teams" in mt:
+        return "Both Teams to Score"
+    if any(k in mt for k in ("h2h", "1x2", "winner", "moneyline", "match")):
+        return "Match Winner (1X2)"
+    return market_type.replace("_", " ").title() if market_type else "Match Winner"
+
+
 def _to_out(s: Signal) -> SignalOut:
+    bf_odds = round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None
+    pin_odds = round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None
+    btype = _classify_bet_type(s.market_type, s.selection)
+
     return SignalOut(
         id=s.id,
         event_id=s.event_id,
@@ -168,6 +197,10 @@ def _to_out(s: Signal) -> SignalOut:
         status=s.status,
         detected_at=s.detected_at.isoformat() if s.detected_at else None,
         event_start_time=s.event_start_time.isoformat() if s.event_start_time else None,
+        betfair_odds=bf_odds,
+        pinnacle_odds=pin_odds,
+        target_bookmaker="stoiximan",
+        bet_type=btype,
     )
 
 
@@ -760,12 +793,17 @@ def get_results(
             else:
                 profit_pct = 0.0
 
+            bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
+            pin_odds = round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None
+            btype = _classify_bet_type(sig.market_type, bet.selection)
+
             results.append({
                 "bet_id": bet.id,
                 "signal_id": sig.id,
                 "selection": bet.selection,
                 "sport": sig.sport,
                 "market_type": sig.market_type,
+                "bet_type": btype,
                 "is_live": bool(sig.is_live),
                 "placed_odds": bet.placed_odds,
                 "stake": bet.stake,
@@ -774,11 +812,13 @@ def get_results(
                 "profit_pct": profit_pct,
                 "edge": sig.edge,
                 "fair_prob": sig.fair_prob,
+                "betfair_odds": bf_odds,
+                "pinnacle_odds": pin_odds,
                 "accuracy": round(sig.fair_prob * 100, 1),
                 "signal_generated_at": sig.detected_at.isoformat() if sig.detected_at else None,
                 "bet_placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
                 "end_time": settled_time_str or (bet.placed_at.isoformat() if bet.placed_at else None),
-                "bookmaker": bet.book,
+                "bookmaker": bet.book or "stoiximan",
                 "dry_run": bet.dry_run,
             })
         return results
@@ -918,7 +958,7 @@ def account_activity(account_id: int) -> dict:
 
 @app.post("/reports/generate")
 def reports_generate(body: ReportParams) -> list[dict]:
-    """Generate a report with optional date/sport/status filters."""
+    """Generate a report with optional date/sport/status filters and player/user filter."""
     with session_scope() as session:
         return generate_report(
             session,
@@ -928,6 +968,7 @@ def reports_generate(body: ReportParams) -> list[dict]:
             status=body.status or None,
             bookmaker=body.bookmaker or None,
             include_dry_run=body.include_dry_run,
+            account_id=body.account_id,
         )
 
 
@@ -940,6 +981,7 @@ def reports_export(
     status: str | None = None,
     bookmaker: str | None = None,
     include_dry_run: bool = True,
+    account_id: int | None = None,
 ) -> Response:
     """Export report as CSV or Excel with human-friendly column names."""
     kwargs = dict(
@@ -949,6 +991,7 @@ def reports_export(
         status=status,
         bookmaker=bookmaker,
         include_dry_run=include_dry_run,
+        account_id=account_id,
     )
     with session_scope() as session:
         if format == "xlsx":

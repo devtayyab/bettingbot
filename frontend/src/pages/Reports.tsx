@@ -15,16 +15,23 @@ const COLUMN_LABELS: Record<string, string> = {
   bet_id: 'Bet ID',
   selection: 'Bet Selection',
   sport: 'Sport',
+  bet_type: 'Bet Type',
   market_type: 'Market Type',
   is_live: 'Live / Pre-Match',
+  target_bookmaker: 'Platform (Stoiximan)',
+  target_odds: 'Target Odds (Stoiximan)',
+  betfair_odds: 'Betfair Exchange Odds',
+  pinnacle_odds: 'Pinnacle Odds',
   edge: 'Edge %',
   fair_prob: 'Fair Probability',
   confirm_prob: 'Confirmation Probability',
-  target_odds: 'Target Odds',
   placed_odds: 'Odds at Placement',
   recommended_stake: 'Recommended Stake',
   requested_stake: 'Stake Requested',
   stake: 'Stake Accepted',
+  account_name: 'Client / Player',
+  allocated_stake: 'Player Stake Share',
+  player_profit: 'Player Net Profit / Loss',
   potential_profit: 'Profit If Won',
   potential_loss: 'Loss If Lost',
   outcome: 'Outcome',
@@ -34,7 +41,6 @@ const COLUMN_LABELS: Record<string, string> = {
   dry_run: 'Paper Bet',
   detected_at: 'Bet Identified At',
   placed_at: 'Bet Placed At',
-  bookmaker: 'Bookmaker',
   status: 'Signal Status',
   max_bet: 'Max Bet Available',
   variables_complete: 'All Variables Available',
@@ -44,6 +50,23 @@ interface ReportRow {
   [key: string]: string | number | boolean | null | undefined;
 }
 
+interface AccountOption {
+  id: number;
+  name: string;
+  bookmaker: string;
+  percentage_share: number;
+}
+
+function formatEuropeanOdds(odds: unknown): string {
+  if (odds == null || odds === '' || isNaN(Number(odds))) return '—';
+  return Number(odds).toFixed(2).replace('.', ',');
+}
+
+function formatEuropeanCurrency(val: unknown): string {
+  if (val == null || val === '' || isNaN(Number(val))) return '—';
+  return '€' + Number(val).toFixed(2).replace('.', ',');
+}
+
 export const Reports: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -51,10 +74,21 @@ export const Reports: React.FC = () => {
   const [status, setStatus] = useState('');
   const [bookmaker, setBookmaker] = useState('');
   const [includeDryRun, setIncludeDryRun] = useState(true);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [reportData, setReportData] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [settlingId, setSettlingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/accounts`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setAccounts(data);
+      })
+      .catch(() => {});
+  }, []);
 
   const buildParams = () => ({
     date_from: dateFrom || null,
@@ -63,6 +97,7 @@ export const Reports: React.FC = () => {
     status: status || null,
     bookmaker: bookmaker || null,
     include_dry_run: includeDryRun,
+    account_id: selectedAccountId ? parseInt(selectedAccountId, 10) : null,
   });
 
   const generateReport = async () => {
@@ -83,7 +118,7 @@ export const Reports: React.FC = () => {
 
   useEffect(() => {
     generateReport();
-  }, []);
+  }, [selectedAccountId]);
 
   const handleSettle = async (betId: number, outcome: 'won' | 'lost' | 'void') => {
     setSettlingId(betId);
@@ -118,6 +153,7 @@ export const Reports: React.FC = () => {
       if (sport) params.set('sport', sport);
       if (status) params.set('status', status);
       if (bookmaker) params.set('bookmaker', bookmaker);
+      if (selectedAccountId) params.set('account_id', selectedAccountId);
       params.set('include_dry_run', String(includeDryRun));
 
       const res = await fetch(`${API}/reports/export?${params}`);
@@ -137,6 +173,7 @@ export const Reports: React.FC = () => {
     }
   };
 
+  const selectedAccountObj = accounts.find((a) => String(a.id) === selectedAccountId);
   const columns = reportData.length > 0 ? Object.keys(reportData[0]) : [];
 
   // Summary KPI Metrics
@@ -145,17 +182,33 @@ export const Reports: React.FC = () => {
   const wonBets = bets.filter((r) => r.outcome === 'won').length;
   const lostBets = bets.filter((r) => r.outcome === 'lost').length;
   const pendingBets = bets.filter((r) => r.outcome === 'pending').length;
-  const totalProfit = bets.reduce((acc, r) => acc + (typeof r.profit === 'number' ? r.profit : 0), 0);
-  const totalStaked = bets.reduce((acc, r) => acc + (typeof r.stake === 'number' ? r.stake : 0), 0);
-  const winRate = (wonBets + lostBets) > 0 ? ((wonBets / (wonBets + lostBets)) * 100).toFixed(1) : '0.0';
-  const roi = totalStaked > 0 ? ((totalProfit / totalStaked) * 100).toFixed(1) : '0.0';
+
+  // Staked and Profit: if a player/user is selected, show player-specific numbers
+  const totalProfit = bets.reduce((acc, r) => {
+    const val = selectedAccountObj && r.player_profit != null
+      ? Number(r.player_profit)
+      : (typeof r.profit === 'number' ? r.profit : 0);
+    return acc + (isNaN(val) ? 0 : val);
+  }, 0);
+
+  const totalStaked = bets.reduce((acc, r) => {
+    const val = selectedAccountObj && r.allocated_stake != null
+      ? Number(r.allocated_stake)
+      : (typeof r.stake === 'number' ? r.stake : 0);
+    return acc + (isNaN(val) ? 0 : val);
+  }, 0);
+
+  const winRate = (wonBets + lostBets) > 0 ? ((wonBets / (wonBets + lostBets)) * 100).toFixed(1).replace('.', ',') : '0,0';
+  const roi = totalStaked > 0 ? ((totalProfit / totalStaked) * 100).toFixed(1).replace('.', ',') : '0,0';
 
   return (
     <div className="reports-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title text-gradient">Reports & Export</h1>
-          <p className="page-subtitle">Generate, preview, and export bet history with custom filters</p>
+          <h1 className="page-title text-gradient">Reports &amp; Export</h1>
+          <p className="page-subtitle">
+            Client &amp; Player level reporting, European decimal odds, and CSV/Excel exports
+          </p>
         </div>
       </div>
 
@@ -164,6 +217,28 @@ export const Reports: React.FC = () => {
         <div className="section-title">Filter Options</div>
 
         <div className="report-filters">
+          {/* Client / Player Filter */}
+          <div className="form-field" style={{ gridColumn: 'span 2' }}>
+            <label style={{ color: 'var(--brand-accent)', fontWeight: 600 }}>
+              👤 Client / Player (User Account)
+            </label>
+            <select
+              value={selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              style={{
+                borderColor: selectedAccountId ? 'var(--brand-accent)' : undefined,
+                background: selectedAccountId ? 'rgba(99, 102, 241, 0.08)' : undefined,
+              }}
+            >
+              <option value="">All Clients (Global Unified View)</option>
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  👤 {acc.name} — ({acc.bookmaker.toUpperCase()} · {(acc.percentage_share * 100).toFixed(0)}% Stake Share)
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="form-field">
             <label>From Date</label>
             <input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
@@ -198,7 +273,7 @@ export const Reports: React.FC = () => {
             <label>Bookmaker</label>
             <select value={bookmaker} onChange={(e) => setBookmaker(e.target.value)}>
               <option value="">All Bookmakers</option>
-              <option value="stoiximan">Stoiximan</option>
+              <option value="stoiximan">Stoiximan (Default)</option>
               <option value="betano">Betano</option>
               <option value="bet365">Bet365</option>
             </select>
@@ -219,80 +294,99 @@ export const Reports: React.FC = () => {
           </button>
 
           <button
-            className="btn btn-success"
+            className="btn btn-ghost"
             onClick={() => exportFile('csv')}
             disabled={exporting || reportData.length === 0}
-            title="Export as CSV with user-friendly column names"
+            title="Download CSV formatted file"
           >
-            {exporting ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Exporting…</> : '⬇ Export CSV'}
+            {exporting ? <span className="spinner" style={{ width: '14px', height: '14px' }} /> : '📥 Export CSV'}
           </button>
 
           <button
-            className="btn btn-success"
+            className="btn btn-ghost"
             onClick={() => exportFile('xlsx')}
             disabled={exporting || reportData.length === 0}
-            title="Export as Excel (.xlsx) with user-friendly column names"
+            title="Download formatted Excel spreadsheet"
           >
-            {exporting ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Exporting…</> : '⬇ Export Excel (.xlsx)'}
+            {exporting ? <span className="spinner" style={{ width: '14px', height: '14px' }} /> : '📊 Export Excel (.xlsx)'}
           </button>
-
-          {reportData.length > 0 && (
-            <span style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              {reportData.length} row{reportData.length !== 1 ? 's' : ''} found
-            </span>
-          )}
         </div>
       </div>
 
-      {/* Summary KPI Cards for Paper Trading / Testing */}
-      {totalBets > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Tracked Bets</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--brand-accent)' }}>{totalBets}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>{pendingBets} pending</div>
+      {/* Client Active Notice */}
+      {selectedAccountObj && (
+        <div
+          className="glass-panel"
+          style={{
+            padding: '12px 18px',
+            marginBottom: 'var(--space-5)',
+            borderLeft: '4px solid var(--brand-accent)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          <div>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Currently viewing report for Client:</span>{' '}
+            <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedAccountObj.name}</strong>{' '}
+            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc', fontSize: '0.75rem' }}>
+              Platform: {selectedAccountObj.bookmaker.toUpperCase()}
+            </span>{' '}
+            <span className="pill" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontSize: '0.75rem' }}>
+              Stake Share: {(selectedAccountObj.percentage_share * 100).toFixed(0)}%
+            </span>
           </div>
-          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Won / Lost</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>
-              <span style={{ color: 'var(--accent-emerald, #10b981)' }}>{wonBets}</span> / <span style={{ color: 'var(--accent-rose, #ef4444)' }}>{lostBets}</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Win Rate: {winRate}%</div>
-          </div>
-          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Simulated Net Profit</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: totalProfit >= 0 ? '#10b981' : '#ef4444' }}>
-              {totalProfit >= 0 ? `+${totalProfit.toFixed(2)}` : totalProfit.toFixed(2)}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Staked: {totalStaked.toFixed(2)}</div>
-          </div>
-          <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Simulated ROI</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: Number(roi) >= 0 ? '#10b981' : '#ef4444' }}>
-              {Number(roi) >= 0 ? `+${roi}%` : `${roi}%`}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Paper Trading Mode (No Risk)</div>
-          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setSelectedAccountId('')}
+            style={{ fontSize: '0.75rem' }}
+          >
+            Reset to Global View
+          </button>
         </div>
       )}
 
-      {/* Column Labels Legend */}
-      {reportData.length > 0 && (
-        <div className="glass-panel" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          <strong style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
-            📋 Column Names (as they appear in exports):
-          </strong>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 24px' }}>
-            {columns.map((col) => (
-              <span key={col}>
-                <code style={{ color: 'var(--brand-accent)', fontSize: '0.75rem' }}>{col}</code>
-                {' → '}
-                <strong style={{ color: 'var(--text-secondary)' }}>{COLUMN_LABELS[col] ?? col}</strong>
-              </span>
-            ))}
-          </div>
+      {/* KPI Metrics Summary Bar */}
+      <div className="kpi-grid" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="glass-panel kpi-card">
+          <span className="kpi-label">Total Bets</span>
+          <span className="kpi-value">{totalBets}</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {wonBets} Won · {lostBets} Lost · {pendingBets} Open
+          </span>
         </div>
-      )}
+
+        <div className="glass-panel kpi-card">
+          <span className="kpi-label">Win Rate</span>
+          <span className="kpi-value" style={{ color: Number(winRate.replace(',', '.')) >= 50 ? 'var(--status-success)' : 'var(--text-primary)' }}>
+            {winRate}%
+          </span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Settled selections</span>
+        </div>
+
+        <div className="glass-panel kpi-card">
+          <span className="kpi-label">{selectedAccountObj ? 'Player Total Staked' : 'Total Staked'}</span>
+          <span className="kpi-value">{formatEuropeanCurrency(totalStaked)}</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {selectedAccountObj ? `${selectedAccountObj.name} allocation` : 'All placed bets'}
+          </span>
+        </div>
+
+        <div className="glass-panel kpi-card">
+          <span className="kpi-label">{selectedAccountObj ? 'Player Net P&L' : 'Net Profit / Loss'}</span>
+          <span
+            className="kpi-value"
+            style={{ color: totalProfit >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}
+          >
+            {totalProfit >= 0 ? '+' : ''}{formatEuropeanCurrency(totalProfit)}
+          </span>
+          <span style={{ fontSize: '0.75rem', color: totalProfit >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
+            ROI: {Number(roi.replace(',', '.')) >= 0 ? '+' : ''}{roi}%
+          </span>
+        </div>
+      </div>
 
       {/* Preview Table */}
       {reportData.length === 0 && !loading ? (
@@ -301,7 +395,12 @@ export const Reports: React.FC = () => {
         </div>
       ) : (
         <div className="glass-panel" style={{ padding: 'var(--space-5)' }}>
-          <div className="section-title">Preview ({reportData.length} rows)</div>
+          <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Preview ({reportData.length} rows) — European Style Odds &amp; Comparisons</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Values formatted in European comma decimal (e.g. 2,25)
+            </span>
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
@@ -352,14 +451,52 @@ export const Reports: React.FC = () => {
                       let display = val == null ? '—' : String(val);
                       let cls = '';
 
+                      // Format European odds
+                      if (col === 'target_odds' || col === 'placed_odds' || col === 'betfair_odds' || col === 'pinnacle_odds') {
+                        display = formatEuropeanOdds(val);
+                      }
+
+                      // Format Currency
+                      if (col === 'recommended_stake' || col === 'stake' || col === 'allocated_stake' || col === 'max_bet') {
+                        if (val != null && !isNaN(Number(val))) {
+                          display = formatEuropeanCurrency(val);
+                        }
+                      }
+
+                      if (col === 'profit' || col === 'player_profit') {
+                        if (val != null && !isNaN(Number(val))) {
+                          const num = Number(val);
+                          cls = num >= 0 ? 'positive' : 'negative';
+                          display = (num >= 0 ? '+' : '') + formatEuropeanCurrency(num);
+                        }
+                      }
+
+                      if (col === 'bet_type') {
+                        return (
+                          <td key={col}>
+                            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc', fontSize: '0.75rem' }}>
+                              {display}
+                            </span>
+                          </td>
+                        );
+                      }
+
+                      if (col === 'target_bookmaker') {
+                        return (
+                          <td key={col}>
+                            <span className="pill" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', fontSize: '0.75rem', fontWeight: 700 }}>
+                              🎯 {display.toUpperCase()}
+                            </span>
+                          </td>
+                        );
+                      }
+
                       if (col === 'edge' || col === 'actual_edge') {
                         const num = parseFloat(display);
                         if (!isNaN(num)) cls = num > 5 ? 'edge-high' : num > 2 ? 'edge-medium' : 'edge-low';
+                        display = display.replace('.', ',');
                       }
-                      if (col === 'profit' && val != null) {
-                        const num = parseFloat(display);
-                        cls = num >= 0 ? 'positive' : 'negative';
-                      }
+
                       if (col === 'is_live') {
                         return (
                           <td key={col}>
