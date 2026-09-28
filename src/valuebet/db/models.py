@@ -113,6 +113,14 @@ class Signal(Base):
     # Whether all required data variables were present when the signal was created
     variables_complete: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Stoiximan-style 3-box odds display (home / draw / away for 1X2 markets).
+    # Stored as individual columns for easy querying + JSON blob for other market types.
+    home_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    draw_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    away_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # All selections' odds serialised as JSON (e.g. {"Iceland": 1.29, "Draw": 5.40, "Estonia": 11.50})
+    all_market_odds_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     status: Mapped[str] = mapped_column(String(16), default="detected", index=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True

@@ -31,9 +31,46 @@ def _parse_commence_time(raw: str | None) -> datetime | None:
 
 # Map our Sport enum to The Odds API sport keys
 _SPORT_KEYS = {
-    Sport.SOCCER: ["soccer_epl", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_italy_serie_a", "soccer_uefa_champs_league"],
-    Sport.TENNIS: ["tennis_atp_wimbledon", "tennis_wta_wimbledon", "tennis_atp_us_open", "tennis_wta_us_open"],
-    Sport.BASKETBALL: ["basketball_nba", "basketball_euroleague", "basketball_ncaab"],
+    Sport.SOCCER: [
+        # Major domestic leagues
+        "soccer_epl",
+        "soccer_spain_la_liga",
+        "soccer_germany_bundesliga",
+        "soccer_italy_serie_a",
+        "soccer_france_ligue_one",
+        "soccer_portugal_primeira_liga",
+        "soccer_netherlands_eredivisie",
+        # European cups
+        "soccer_uefa_champs_league",
+        "soccer_uefa_europa_league",
+        "soccer_uefa_europa_conference_league",
+        # International competitions (Iceland vs Estonia, Nations League etc.)
+        "soccer_fifa_world_cup",
+        "soccer_uefa_nations_league",
+        "soccer_uefa_euro_qualification",
+        "soccer_uefa_european_championship",
+        "soccer_conmebol_copa_america",
+        # More domestic
+        "soccer_turkey_super_league",
+        "soccer_greece_super_league",
+        "soccer_denmark_superliga",
+    ],
+    Sport.TENNIS: [
+        "tennis_atp_wimbledon",
+        "tennis_wta_wimbledon",
+        "tennis_atp_us_open",
+        "tennis_wta_us_open",
+        "tennis_atp_french_open",
+        "tennis_wta_french_open",
+        "tennis_atp_australian_open",
+        "tennis_wta_australian_open",
+    ],
+    Sport.BASKETBALL: [
+        "basketball_nba",
+        "basketball_euroleague",
+        "basketball_ncaab",
+        "basketball_nba_preseason",
+    ],
     Sport.AMERICAN_FOOTBALL: ["americanfootball_nfl", "americanfootball_ncaaf"],
     Sport.BASEBALL: ["baseball_mlb"],
     Sport.ICE_HOCKEY: ["icehockey_nhl"],

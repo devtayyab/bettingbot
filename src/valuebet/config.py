@@ -122,5 +122,20 @@ class Settings(BaseSettings):
     placement_bookmaker: str = "stoiximan"
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return the cached Settings instance.
+
+    Settings is expensive to construct (reads .env + validates all fields).
+    The cache is invalidated by ``reset_settings_cache()`` when config is
+    patched at runtime via PATCH /config so the next call re-reads env vars.
+    """
     return Settings()
+
+
+def reset_settings_cache() -> None:
+    """Invalidate the settings cache so the next ``get_settings()`` re-parses env."""
+    get_settings.cache_clear()

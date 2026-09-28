@@ -311,7 +311,8 @@ class ValueEngine:
                 continue
 
             # 5. Sharp confirmation (Pinnacle agrees with Betfair).
-            confirm_prob = conf_fair_by_key.get(key)
+            # Reset to None each iteration — previous selection's value must not leak.
+            confirm_prob: float | None = conf_fair_by_key.get(key)
             if confirm_prob is None:
                 # No Pinnacle price for this selection. When confirmation is
                 # required (default) we will NOT bet on the reference alone.
@@ -377,6 +378,8 @@ class ValueEngine:
                     edge=e,
                     recommended_stake=stake,
                     detected_at=now,
+                    # Capture all selections' odds for Stoiximan-style 1X2 display
+                    all_market_odds={q.selection: q.decimal_odds for q in target.quotes},
                 )
             )
             log.info(

@@ -21,6 +21,12 @@ export interface SignalData {
   pinnacle_odds?: number | null;
   target_bookmaker?: string;
   bet_type?: string | null;
+  // Stoiximan-style 3-box odds display
+  home_odds?: number | null;
+  draw_odds?: number | null;
+  away_odds?: number | null;
+  // Full market odds {selection: decimal_odds} for any market type
+  all_market_odds?: Record<string, number> | null;
 }
 
 interface UseFeedReturn {
