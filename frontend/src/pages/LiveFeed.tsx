@@ -75,6 +75,119 @@ function getBetTypeBadge(betType?: string | null, marketType?: string, selection
   return { label: betType || 'Match Winner (1X2)', icon: '⚽', color: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.3)' };
 }
 
+// Render Stoiximan-style 1/X/2 odds boxes for a market
+interface OddsBoxesProps {
+  allMarketOdds: Record<string, number> | null | undefined;
+  homeOdds: number | null | undefined;
+  drawOdds: number | null | undefined;
+  awayOdds: number | null | undefined;
+  selectedSelection: string;
+  marketType: string;
+}
+
+function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelection, marketType }: OddsBoxesProps) {
+  // Build the list of (label, odds, isSelected) from all_market_odds if available,
+  // otherwise fall back to the home/draw/away individual columns.
+  type OddsEntry = { label: string; odds: number; isSelected: boolean; key: string };
+  let entries: OddsEntry[] = [];
+
+  if (allMarketOdds && Object.keys(allMarketOdds).length > 0) {
+    entries = Object.entries(allMarketOdds).map(([sel, odds]) => ({
+      key: sel,
+      label: sel,
+      odds,
+      isSelected: sel.toLowerCase() === selectedSelection.toLowerCase(),
+    }));
+  } else if (homeOdds != null || drawOdds != null || awayOdds != null) {
+    const mt = marketType.toUpperCase();
+    const is1x2 = mt.includes('1X2') || mt.includes('MATCH_ODDS') || mt.includes('H2H');
+    if (is1x2) {
+      if (homeOdds != null) entries.push({ key: '1', label: '1', odds: homeOdds, isSelected: false });
+      if (drawOdds != null) entries.push({ key: 'X', label: 'X', odds: drawOdds, isSelected: false });
+      if (awayOdds != null) entries.push({ key: '2', label: '2', odds: awayOdds, isSelected: false });
+    }
+  }
+
+  if (entries.length === 0) return null;
+
+  // For 3-way markets label 1/X/2 if labels are team names
+  const is3way = entries.length === 3;
+  const labels = is3way ? ['1', 'X', '2'] : null;
+
+  return (
+    <div style={{
+      display: 'flex',
+      gap: '6px',
+      margin: '8px 0',
+      flexWrap: 'wrap',
+    }}>
+      {entries.map((entry, idx) => {
+        const selected = entry.isSelected;
+        return (
+          <div
+            key={entry.key}
+            title={entry.label}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              minWidth: '68px',
+              flex: '1',
+              padding: '5px 8px',
+              borderRadius: '6px',
+              border: selected
+                ? '1.5px solid #38bdf8'
+                : '1px solid rgba(255,255,255,0.1)',
+              background: selected
+                ? 'rgba(56,189,248,0.18)'
+                : 'rgba(255,255,255,0.04)',
+              boxShadow: selected ? '0 0 8px rgba(56,189,248,0.35)' : 'none',
+              cursor: 'default',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {/* Position label (1/X/2) */}
+            <span style={{
+              fontSize: '0.62rem',
+              color: selected ? '#38bdf8' : 'var(--text-muted)',
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              marginBottom: '1px',
+            }}>
+              {labels ? labels[idx] : (entry.label.length > 12 ? entry.label.slice(0, 11) + '…' : entry.label)}
+            </span>
+            {/* Decimal odds */}
+            <span style={{
+              fontSize: '0.97rem',
+              fontWeight: 700,
+              color: selected ? '#38bdf8' : 'var(--text-primary)',
+              letterSpacing: '0.01em',
+            }}>
+              {entry.odds.toFixed(2).replace('.', ',')}
+            </span>
+            {/* Team name (tooltip-style, truncated) */}
+            {labels && (
+              <span style={{
+                fontSize: '0.58rem',
+                color: selected ? 'rgba(56,189,248,0.8)' : 'var(--text-muted)',
+                marginTop: '1px',
+                maxWidth: '72px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textAlign: 'center',
+              }}>
+                {entry.label}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function useToast() {
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: string }[]>([]);
   const add = (msg: string, type = 'info') => {
@@ -323,6 +436,16 @@ export const LiveFeed: React.FC = () => {
                   <span className="bet-card__sport">{s.sport.replace('_', ' ')}</span>
                   <span className="bet-card__market">{s.market_type}</span>
                 </div>
+
+                {/* Stoiximan-style 1/X/2 odds boxes */}
+                <OddsBoxes
+                  allMarketOdds={s.all_market_odds}
+                  homeOdds={s.home_odds}
+                  drawOdds={s.draw_odds}
+                  awayOdds={s.away_odds}
+                  selectedSelection={s.selection}
+                  marketType={s.market_type}
+                />
 
                 {/* Bookmaker European Odds Comparison Bar */}
                 <div className="bookmaker-bar">

@@ -83,6 +83,12 @@ class SignalOut(BaseModel):
     pinnacle_odds: float | None = None
     target_bookmaker: str = "stoiximan"
     bet_type: str | None = None
+    # Stoiximan-style 3-box odds display
+    home_odds: float | None = None
+    draw_odds: float | None = None
+    away_odds: float | None = None
+    # Full market odds as {selection: decimal_odds} for any market type
+    all_market_odds: dict[str, float] | None = None
 
 
 class PlaceIn(BaseModel):
@@ -180,6 +186,15 @@ def _to_out(s: Signal) -> SignalOut:
     pin_odds = round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None
     btype = _classify_bet_type(s.market_type, s.selection)
 
+    # Parse all_market_odds from JSON blob stored in DB
+    all_market_odds: dict[str, float] | None = None
+    try:
+        if s.all_market_odds_json:
+            import json as _json
+            all_market_odds = _json.loads(s.all_market_odds_json)
+    except Exception:
+        pass
+
     return SignalOut(
         id=s.id,
         event_id=s.event_id,
@@ -201,6 +216,10 @@ def _to_out(s: Signal) -> SignalOut:
         pinnacle_odds=pin_odds,
         target_bookmaker="stoiximan",
         bet_type=btype,
+        home_odds=s.home_odds,
+        draw_odds=s.draw_odds,
+        away_odds=s.away_odds,
+        all_market_odds=all_market_odds,
     )
 
 
@@ -216,7 +235,11 @@ def _parse_dt(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(s)
+        # Only add tzinfo if the parsed datetime is naive (no timezone info)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     except ValueError:
         return None
 
@@ -308,8 +331,8 @@ def upload_cookies(cookies: list[dict[str, Any]]) -> dict:
         raise HTTPException(400, detail=str(exc))
 
 @app.delete("/cookies")
-def clear_cookies() -> dict:
-    """Delete saved cookies."""
+def clear_cookies_legacy() -> dict:
+    """Delete saved cookies (legacy endpoint)."""
     from ..placement.session_store import delete_cookie_file
     delete_cookie_file()
     return {"message": "Cookies deleted."}
@@ -413,6 +436,9 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
 
     # 3. Update runtime process env
     os.environ["THE_ODDS_API_KEY"] = new_key
+    # Invalidate settings cache so next get_settings() re-reads the updated key
+    from ..config import reset_settings_cache
+    reset_settings_cache()
     log.info("odds_api_key_updated", remaining=rem)
 
     masked = (new_key[:6] + "..." + new_key[-4:]) if len(new_key) > 10 else "***"
@@ -460,6 +486,9 @@ def patch_config(body: ConfigUpdateIn) -> dict:
     # Also apply to running process environment immediately
     for key, val in env_map.items():
         os.environ[key] = val
+    # Invalidate settings cache so next get_settings() re-reads the updated env
+    from ..config import reset_settings_cache
+    reset_settings_cache()
     log.info("config_updated", updates=list(updates.keys()))
     return {"updated": list(updates.keys()), "message": "Config saved and applied"}
 
@@ -524,11 +553,10 @@ async def signals_feed() -> StreamingResponse:
             try:
                 with session_scope() as session:
                     sigs = open_signals(session)
-                    # Send full list on first connection, then only deltas
                     current_ids = {s.id for s in sigs}
-                    new_sigs = [_to_out(s) for s in sigs if s.id not in last_ids]
-                    if new_sigs or not last_ids:
-                        payload = json.dumps([s.model_dump() for s in [_to_out(s) for s in sigs]])
+                    # Send on first connect (last_ids empty) OR when signal list changes
+                    if current_ids != last_ids:
+                        payload = json.dumps([_to_out(s).model_dump() for s in sigs])
                         yield f"data: {payload}\n\n"
                         last_ids = current_ids
             except Exception as exc:
