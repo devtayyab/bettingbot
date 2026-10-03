@@ -89,7 +89,7 @@ class ValueEngine:
                 source=self.reference.name,
                 msg="no signals are possible this cycle without reference prices",
             )
-        if not conf_markets and self.settings.require_confirmation:
+        if not conf_markets and self.settings.require_confirmation and self.settings.enable_pinnacle_confirmation:
             log.warning(
                 "no_confirmation_markets",
                 sport=sport.value,
@@ -264,6 +264,8 @@ class ValueEngine:
             sport_cfg["max_live_latency_seconds"] if is_live
             else sport_cfg["max_prematch_latency_seconds"]
         )
+        max_odds = sport_cfg.get("max_odds", s.max_odds)
+        min_odds = sport_cfg.get("min_odds", s.min_odds)
 
         tally = getattr(self, "_drop_tally", None)
         if tally is None:
@@ -281,6 +283,16 @@ class ValueEngine:
                 drop("no_reference_price")
                 log.debug("selection_unmatched", selection=tq.selection, key=key,
                           available=sorted(ref_fair_by_key))
+                continue
+
+            # 2b. Odds range filter (e.g. 1.00 to 6.00 to exclude extreme longshots).
+            if max_odds is not None and tq.decimal_odds > max_odds:
+                log.debug("odds_above_max", selection=tq.selection, odds=tq.decimal_odds, max_odds=max_odds)
+                drop("odds_above_max")
+                continue
+            if min_odds is not None and tq.decimal_odds < min_odds:
+                log.debug("odds_below_min", selection=tq.selection, odds=tq.decimal_odds, min_odds=min_odds)
+                drop("odds_below_min")
                 continue
 
             # 3. Favorites only.
@@ -313,22 +325,23 @@ class ValueEngine:
             # 5. Sharp confirmation (Pinnacle agrees with Betfair).
             # Reset to None each iteration — previous selection's value must not leak.
             confirm_prob: float | None = conf_fair_by_key.get(key)
-            if confirm_prob is None:
-                # No Pinnacle price for this selection. When confirmation is
-                # required (default) we will NOT bet on the reference alone.
-                if s.require_confirmation:
-                    log.debug("no_confirmation_skip", selection=tq.selection)
-                    drop("no_confirmation_price")
+            if s.enable_pinnacle_confirmation:
+                if confirm_prob is None:
+                    # No Pinnacle price for this selection. When confirmation is
+                    # required we will NOT bet on the reference alone.
+                    if s.require_confirmation:
+                        log.debug("no_confirmation_skip", selection=tq.selection)
+                        drop("no_confirmation_price")
+                        continue
+                elif abs(confirm_prob - fair_prob) > s.confirmation_tolerance:
+                    log.debug(
+                        "confirmation_rejected",
+                        selection=tq.selection,
+                        betfair=round(fair_prob, 4),
+                        pinnacle=round(confirm_prob, 4),
+                    )
+                    drop("confirmation_disagrees")
                     continue
-            elif abs(confirm_prob - fair_prob) > s.confirmation_tolerance:
-                log.debug(
-                    "confirmation_rejected",
-                    selection=tq.selection,
-                    betfair=round(fair_prob, 4),
-                    pinnacle=round(confirm_prob, 4),
-                )
-                drop("confirmation_disagrees")
-                continue
 
             # 6. Size it.
             # Feature 6: Event exposure cap (Correlated Bets)

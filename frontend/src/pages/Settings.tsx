@@ -12,6 +12,9 @@ interface ConfigData {
   min_liquidity: number;
   max_spread: number;
   require_confirmation: boolean;
+  enable_pinnacle_confirmation: boolean;
+  min_odds: number;
+  max_odds: number;
   favorite_min_prob: number;
   kelly_fraction: number;
   max_stake: number;
@@ -28,6 +31,9 @@ interface ConfigData {
 const FIELD_LABELS: Record<string, { label: string; description: string; type: string; min?: number; max?: number; step?: number }> = {
   edge_threshold: { label: 'Edge Threshold', description: 'Minimum edge required to generate a value signal (pre-match)', type: 'percent', min: 0, max: 1, step: 0.005 },
   live_edge_threshold: { label: 'Live Edge Threshold', description: 'Minimum edge required for live (in-play) signals — should be higher than pre-match', type: 'percent', min: 0, max: 1, step: 0.005 },
+  min_odds: { label: 'Min Target Odds', description: 'Minimum allowed decimal odds (e.g. 1.01)', type: 'number', min: 1.0, step: 0.05 },
+  max_odds: { label: 'Max Target Odds', description: 'Maximum allowed decimal odds (e.g. 6.00 to exclude longshots and focus simulation on winning markets)', type: 'number', min: 1.01, step: 0.1 },
+  enable_pinnacle_confirmation: { label: 'Enable Pinnacle Double-Check', description: 'When disabled, signals are not dropped due to Pinnacle, providing ample simulation data', type: 'boolean' },
   kelly_fraction: { label: 'Kelly Fraction', description: 'Fraction of full Kelly to stake (0.25 = quarter Kelly)', type: 'percent', min: 0, max: 1, step: 0.05 },
   max_stake: { label: 'Max Stake per Bet (€)', description: 'Hard cap on any single bet stake regardless of Kelly sizing', type: 'number', min: 0, step: 1 },
   bankroll: { label: 'Bankroll (€)', description: 'Total available capital — used for Kelly stake calculations', type: 'number', min: 0, step: 50 },
@@ -47,7 +53,7 @@ const FIELD_LABELS: Record<string, { label: string; description: string; type: s
 const GROUPS = [
   {
     title: '🎯 Value Detection',
-    fields: ['edge_threshold', 'live_edge_threshold', 'confirmation_tolerance', 'require_confirmation'],
+    fields: ['edge_threshold', 'live_edge_threshold', 'min_odds', 'max_odds', 'enable_pinnacle_confirmation', 'confirmation_tolerance', 'require_confirmation'],
   },
   {
     title: '💰 Stake Sizing',

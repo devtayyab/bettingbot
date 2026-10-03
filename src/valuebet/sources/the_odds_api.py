@@ -88,6 +88,12 @@ _SPORT_KEYS = {
 }
 
 
+import time
+
+_ODDS_CACHE: dict[str, tuple[float, list[dict], str | None, str | None]] = {}
+_ODDS_CACHE_TTL = 60.0
+
+
 class TheOddsAPISource:
     def __init__(self, target_bookmaker: str = "betfair_ex_uk", name: str | None = None) -> None:
         self._settings = get_settings()
@@ -113,105 +119,116 @@ class TheOddsAPISource:
         books_available: set[str] = set()
 
         for sport_key in sport_keys:
-            try:
-                res = self._client.get(
-                    f"/sports/{sport_key}/odds/",
-                    params={
-                        "apiKey": api_key,
-                        "regions": "eu,uk",
-                        "markets": "h2h",
-                        "oddsFormat": "decimal",
-                    },
-                )
-                if res.status_code != 200:
-                    log.error("the_odds_api_error", sport_key=sport_key,
-                              status=res.status_code, body=res.text[:500])
+            cache_key = f"{sport_key}:eu,uk:h2h"
+            cached = _ODDS_CACHE.get(cache_key)
+            if cached and (time.time() - cached[0]) < _ODDS_CACHE_TTL:
+                events = cached[1]
+                remaining = cached[2]
+                used = cached[3]
+            else:
+                try:
+                    res = self._client.get(
+                        f"/sports/{sport_key}/odds/",
+                        params={
+                            "apiKey": api_key,
+                            "regions": "eu,uk",
+                            "markets": "h2h",
+                            "oddsFormat": "decimal",
+                        },
+                    )
+                    if res.status_code != 200:
+                        log.error("the_odds_api_error", sport_key=sport_key,
+                                  status=res.status_code, body=res.text[:500])
+                        continue
+
+                    # The API meters usage in response headers; running out is a silent
+                    # cause of empty scans.
+                    remaining = res.headers.get("x-requests-remaining")
+                    used = res.headers.get("x-requests-used")
+                    events = res.json()
+                    _ODDS_CACHE[cache_key] = (time.time(), events, remaining, used)
+                except Exception as exc:
+                    log.error("the_odds_api_request_failed", sport_key=sport_key, error=str(exc))
                     continue
 
-                # The API meters usage in response headers; running out is a silent
-                # cause of empty scans.
-                remaining = res.headers.get("x-requests-remaining")
-                if remaining is not None:
-                    try:
-                        if int(remaining) < 100:
-                            log.warning("the_odds_api_quota_low",
-                                        requests_remaining=int(remaining),
-                                        used=res.headers.get("x-requests-used"))
-                    except ValueError:
-                        pass
+            if remaining is not None:
+                try:
+                    if int(remaining) < 100:
+                        log.warning("the_odds_api_quota_low",
+                                    requests_remaining=int(remaining),
+                                    used=used)
+                except ValueError:
+                    pass
 
-                events = res.json()
-                for ev in events:
-                    event_id = ev.get("id", "")
-                    home_team = ev.get("home_team", "Home")
-                    away_team = ev.get("away_team", "Away")
-                    start_time = _parse_commence_time(ev.get("commence_time")) or now
+            for ev in events:
+                event_id = ev.get("id", "")
+                home_team = ev.get("home_team", "Home")
+                away_team = ev.get("away_team", "Away")
+                start_time = _parse_commence_time(ev.get("commence_time")) or now
+                
+                # Look for our target bookmaker in the event's bookmakers list
+                bookmakers = ev.get("bookmakers", [])
+                events_seen += 1
+                books_available.update(
+                    bm.get("key", "") for bm in bookmakers if bm.get("key")
+                )
+                target_bm = next(
+                    (bm for bm in bookmakers if bm.get("key") == self.target_bookmaker),
+                    None,
+                )
+                if not target_bm:
+                    events_without_target += 1
+                    continue
+
+                h2h_market = next(
+                    (m for m in target_bm.get("markets", []) if m.get("key") == "h2h"),
+                    None,
+                )
+                if not h2h_market:
+                    events_without_h2h += 1
+                    continue
+
+                quotes: list[Quote] = []
+                for outcome in h2h_market.get("outcomes", []):
+                    name = outcome.get("name")
+                    price = outcome.get("price")
+                    if not name or not price:
+                        continue
                     
-                    # Look for our target bookmaker in the event's bookmakers list
-                    bookmakers = ev.get("bookmakers", [])
-                    events_seen += 1
-                    books_available.update(
-                        bm.get("key", "") for bm in bookmakers if bm.get("key")
-                    )
-                    target_bm = next(
-                        (bm for bm in bookmakers if bm.get("key") == self.target_bookmaker),
-                        None,
-                    )
-                    if not target_bm:
-                        events_without_target += 1
-                        continue
-
-                    h2h_market = next(
-                        (m for m in target_bm.get("markets", []) if m.get("key") == "h2h"),
-                        None,
-                    )
-                    if not h2h_market:
-                        events_without_h2h += 1
-                        continue
-
-                    quotes: list[Quote] = []
-                    for outcome in h2h_market.get("outcomes", []):
-                        name = outcome.get("name")
-                        price = outcome.get("price")
-                        if not name or not price:
-                            continue
-                        
-                        quotes.append(
-                            Quote(
-                                source=self.name,
-                                selection=name,
-                                decimal_odds=float(price),
-                                lay_odds=None,
-                                back_liquidity=None,
-                                lay_liquidity=None,
-                                captured_at=now,
-                            )
-                        )
-
-                    if not quotes:
-                        continue
-
-                    snapshots.append(
-                        MarketSnapshot(
-                            event_id=event_id,
-                            market_id=f"oddsapi-{event_id}",
-                            market_type="MATCH_ODDS",
-                            sport=sport,
-                            status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
-                            start_time=start_time,
-                            # The Odds API exposes no volume or book depth. These
-                            # stay None rather than being invented: a hard-coded
-                            # 10000/5000 silently satisfied every market-health gate
-                            # (min_total_matched, min_liquidity) instead of skipping
-                            # a check we have no data for.
-                            total_matched=None,
-                            quotes=quotes,
-                            is_suspended=False,
-                            settlement_rule=SettlementRule.REGULATION_TIME,
+                    quotes.append(
+                        Quote(
+                            source=self.name,
+                            selection=name,
+                            decimal_odds=float(price),
+                            lay_odds=None,
+                            back_liquidity=None,
+                            lay_liquidity=None,
+                            captured_at=now,
                         )
                     )
-            except Exception as e:
-                log.error("the_odds_api_fetch_failed", sport_key=sport_key, error=str(e))
+
+                if not quotes:
+                    continue
+
+                snapshots.append(
+                    MarketSnapshot(
+                        event_id=event_id,
+                        market_id=f"oddsapi-{event_id}",
+                        market_type="MATCH_ODDS",
+                        sport=sport,
+                        status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
+                        start_time=start_time,
+                        # The Odds API exposes no volume or book depth. These
+                        # stay None rather than being invented: a hard-coded
+                        # 10000/5000 silently satisfied every market-health gate
+                        # (min_total_matched, min_liquidity) instead of skipping
+                        # a check we have no data for.
+                        total_matched=None,
+                        quotes=quotes,
+                        is_suspended=False,
+                        settlement_rule=SettlementRule.REGULATION_TIME,
+                    )
+                )
 
         log.info(
             "the_odds_api_fetch",
