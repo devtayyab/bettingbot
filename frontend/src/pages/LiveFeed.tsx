@@ -205,7 +205,35 @@ export const LiveFeed: React.FC = () => {
   const [sportFilter, setSportFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [scanning, setScanning] = useState(false);
   const { toasts, toast } = useToast();
+
+  const handleTriggerScan = async () => {
+    if (scanning) return;
+    setScanning(true);
+    toast('Scanning markets for value signals...', 'info');
+    try {
+      const sportParam = sportFilter ? `sport=${encodeURIComponent(sportFilter)}` : 'sport=all';
+      const liveParam = marketFilter === 'live' ? '&live=true' : '';
+      const res = await fetch(`${API}/scan?${sportParam}${liveParam}`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const count = data.new_signals ?? 0;
+        if (count > 0) {
+          toast(`Scan complete: ${count} new signal${count !== 1 ? 's' : ''} found!`, 'success');
+        } else {
+          toast('Scan complete: No new value signals found in current markets.', 'info');
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast(`Scan error: ${err.detail || 'Failed to scan'}`, 'error');
+      }
+    } catch (e: any) {
+      toast(`Scan error: ${e.message}`, 'error');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const mergedSignals = signals.map((s) => ({
     ...s,
@@ -334,6 +362,16 @@ export const LiveFeed: React.FC = () => {
 
           <button
             className="btn btn-ghost btn-sm"
+            onClick={handleTriggerScan}
+            disabled={scanning}
+            title="Trigger an immediate scan of available markets"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+          >
+            {scanning ? '⏳ Scanning...' : '⚡ Scan Now'}
+          </button>
+
+          <button
+            className="btn btn-ghost btn-sm"
             onClick={expandedIds.size === filtered.length && filtered.length > 0 ? collapseAll : expandAll}
             title="Toggle between compact summary and detailed stake/risk view"
             style={{ marginLeft: 'auto' }}
@@ -359,10 +397,20 @@ export const LiveFeed: React.FC = () => {
 
       {/* Signal Cards */}
       {filtered.length === 0 ? (
-        <div className="glass-panel empty-state">
-          {connected
-            ? '⚡ Watching for value signals… New bets will appear here automatically.'
-            : '📡 Connecting to live feed…'}
+        <div className="glass-panel empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-8)' }}>
+          <div>
+            {connected
+              ? '⚡ Watching for value signals… New bets will appear here automatically.'
+              : '📡 Connecting to live feed…'}
+          </div>
+          <button
+            className="btn btn--primary"
+            onClick={handleTriggerScan}
+            disabled={scanning}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: 'var(--space-2)' }}
+          >
+            {scanning ? '⏳ Scanning markets...' : '⚡ Scan Markets Now'}
+          </button>
         </div>
       ) : (
         <div className="bet-cards">

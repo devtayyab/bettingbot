@@ -11,13 +11,18 @@ def _engine(**overrides):
     settings = Settings(
         edge_threshold=overrides.get("edge_threshold", 0.049),
         confirmation_tolerance=overrides.get("confirmation_tolerance", 0.03),
+        enable_pinnacle_confirmation=overrides.get("enable_pinnacle_confirmation", False),
         favorite_min_prob=overrides.get("favorite_min_prob", 0.55),
         kelly_fraction=overrides.get("kelly_fraction", 0.25),
         max_stake=overrides.get("max_stake", 10.0),
         bankroll=overrides.get("bankroll", 500.0),
+        min_odds=overrides.get("min_odds", 1.01),
+        max_odds=overrides.get("max_odds", 6.0),
         sport_overrides={
             "soccer": {
                 "edge_threshold": overrides.get("edge_threshold", 0.049),
+                "min_odds": overrides.get("min_odds", 1.01),
+                "max_odds": overrides.get("max_odds", 6.0),
             }
         }
     )
@@ -33,7 +38,7 @@ def test_detects_value_on_overpriced_favorite():
     assert sig.edge >= 0.049
     assert sig.fair_prob >= 0.55
     assert 0 < sig.recommended_stake <= 10.0
-    assert sig.confirm_prob is not None  # Pinnacle confirmation present
+    assert sig.confirm_prob is not None  # Pinnacle odds captured for display
 
 
 def test_scan_returns_snapshots_for_persistence():
@@ -55,7 +60,26 @@ def test_high_threshold_suppresses_signals():
 
 
 def test_confirmation_tolerance_blocks_disagreement():
-    assert _engine(confirmation_tolerance=0.0001).scan(Sport.SOCCER).signals == []
+    assert _engine(enable_pinnacle_confirmation=True, confirmation_tolerance=0.0001).scan(Sport.SOCCER).signals == []
+
+
+def test_pinnacle_disabled_allows_signals_despite_tight_tolerance():
+    # When Pinnacle confirmation is disabled (default), even extreme tolerance doesn't block signals
+    sigs = _engine(enable_pinnacle_confirmation=False, confirmation_tolerance=0.0001).scan(Sport.SOCCER).signals
+    assert any(s.selection == "Team A" for s in sigs)
+
+
+def test_max_odds_filter_blocks_high_odds():
+    # Team A is offered at 1.80. If max_odds is 1.70, it must be excluded.
+    signals_low_cap = _engine(max_odds=1.70).scan(Sport.SOCCER).signals
+    assert not any(s.selection == "Team A" for s in signals_low_cap)
+
+    # When max_odds is 1.40, all selections including Bayern (1.45) are excluded -> 0 signals.
+    assert _engine(max_odds=1.40).scan(Sport.SOCCER).signals == []
+
+    # If max_odds is 6.00, Team A is included.
+    signals_high_cap = _engine(max_odds=6.00).scan(Sport.SOCCER).signals
+    assert any(s.selection == "Team A" for s in signals_high_cap)
 
 
 def _engine_without_pinnacle_match(require_confirmation: bool):
@@ -63,6 +87,7 @@ def _engine_without_pinnacle_match(require_confirmation: bool):
     # Pinnacle has totally different events -> no market will match.
     pinnacle = MockSource("pinnacle", {"9.999": [("Other X", 1.5), ("Other Y", 2.6)]})
     settings = Settings(
+        enable_pinnacle_confirmation=True,
         require_confirmation=require_confirmation,
         sport_overrides={
             "soccer": {
@@ -74,7 +99,7 @@ def _engine_without_pinnacle_match(require_confirmation: bool):
 
 
 def test_require_confirmation_skips_when_no_pinnacle_price():
-    # Default behaviour: without a Pinnacle confirmation, fire nothing.
+    # When confirmation is enabled and required: without a Pinnacle confirmation, fire nothing.
     assert _engine_without_pinnacle_match(require_confirmation=True).scan(Sport.SOCCER).signals == []
 
 

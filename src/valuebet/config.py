@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     max_spread: float = Field(default=0.10, ge=0, le=1)
     # When true, a signal requires a matching Pinnacle price; never bet on Betfair alone.
     require_confirmation: bool = False
+    enable_pinnacle_confirmation: bool = False
+    min_odds: float = Field(default=1.01, ge=1.0)
+    max_odds: float = Field(default=6.0, gt=1.0)
     favorite_min_prob: float = Field(default=0.10, ge=0, le=1)
     kelly_fraction: float = Field(default=0.25, ge=0, le=1)
     max_stake: float = Field(default=10.0, gt=0)
@@ -81,6 +84,8 @@ class Settings(BaseSettings):
             "min_liquidity": overrides.get("min_liquidity", self.min_liquidity),
             "max_live_latency_seconds": overrides.get("max_live_latency_seconds", self.max_live_latency_seconds),
             "max_prematch_latency_seconds": overrides.get("max_prematch_latency_seconds", self.max_prematch_latency_seconds),
+            "min_odds": overrides.get("min_odds", self.min_odds),
+            "max_odds": overrides.get("max_odds", self.max_odds),
         }
 
     # Cadence

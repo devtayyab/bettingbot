@@ -42,13 +42,55 @@ from ..db.repository import (
 )
 from ..db.session import get_engine, session_scope
 from ..logging import configure_logging, get_logger
+from contextlib import asynccontextmanager
+
 from ..pipeline import run_scan
 from ..placement.base import PlacementRequest
 from .dashboard import DASHBOARD_HTML
 
 configure_logging()
 log = get_logger("api")
-app = FastAPI(title="ValueBet Pilot", version="0.2.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from ..scheduler.run import _scan_prematch, _scan_live, _execute_bets, _track_clv, _settle_bets
+    import threading
+
+    s = get_settings()
+    scheduler = BackgroundScheduler(timezone="UTC")
+    scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
+    scheduler.add_job(_scan_live, "interval", seconds=s.poll_interval_live, id="live")
+    scheduler.add_job(_execute_bets, "interval", seconds=30, id="executor")
+    scheduler.add_job(_track_clv, "interval", minutes=5, id="clv_tracker")
+    scheduler.add_job(_settle_bets, "interval", minutes=15, id="settlement")
+    scheduler.start()
+    log.info(
+        "background_scheduler_started",
+        prematch_interval=s.poll_interval_prematch,
+        live_interval=s.poll_interval_live,
+    )
+
+    # Run initial scan 2s after startup in a background thread
+    timer = threading.Timer(2.0, _scan_prematch)
+    timer.daemon = True
+    timer.start()
+
+    yield
+
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+    try:
+        from ..engine.executor import PlacementRouter
+        PlacementRouter.shared().close_all()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="ValueBet Pilot", version="0.2.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -147,6 +189,9 @@ class ConfigUpdateIn(BaseModel):
     placement_dry_run: bool | None = None
     placement_require_approval: bool | None = None
     require_confirmation: bool | None = None
+    enable_pinnacle_confirmation: bool | None = None
+    min_odds: float | None = None
+    max_odds: float | None = None
     poll_interval_live: int | None = None
     poll_interval_prematch: int | None = None
     allow_demo_fallback: bool | None = None
@@ -305,6 +350,9 @@ def get_config() -> dict:
         "min_liquidity": s.min_liquidity,
         "max_spread": s.max_spread,
         "require_confirmation": s.require_confirmation,
+        "enable_pinnacle_confirmation": s.enable_pinnacle_confirmation,
+        "min_odds": s.min_odds,
+        "max_odds": s.max_odds,
         "favorite_min_prob": s.favorite_min_prob,
         "kelly_fraction": s.kelly_fraction,
         "max_stake": s.max_stake,
