@@ -1,3 +1,12 @@
+# Stage 1: Build the React Frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python Backend + Playwright Chromium
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
@@ -14,6 +23,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
 COPY frontend ./frontend
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN pip install --no-cache-dir -e ".[dev]"
 
 # Install Playwright browser and OS dependencies into the image
