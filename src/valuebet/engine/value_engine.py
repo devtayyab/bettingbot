@@ -118,13 +118,15 @@ class ValueEngine:
                 )
 
             if live:
-                # For live betting, we must ensure score synchronisation
-                # otherwise we abort the scan for desynced events.
+                # For live betting, verify score synchronisation if available.
+                # If score tracker is not available on either side (e.g. using Odds API / no direct Betfair client),
+                # allow the market through unless strict score sync is explicitly required.
+                strict_sync = self.settings.env == "prod" and getattr(self.settings, "require_score_sync", False)
                 synced_target_markets = []
                 for t_mkt in target_markets:
                     ref_state = self.score_tracker.get_state(t_mkt.event_id, self.reference.name)
                     tar_state = self.score_tracker.get_state(t_mkt.event_id, target_src.name)
-                    if states_match(ref_state, tar_state):
+                    if states_match(ref_state, tar_state, strict=strict_sync):
                         synced_target_markets.append(t_mkt)
                     else:
                         desynced += 1
@@ -219,7 +221,8 @@ class ValueEngine:
         for q in ref_quotes:
             if q.lay_odds is not None:
                 # 2. Market Health - Spread & Liquidity per selection
-                spread = (q.lay_odds - q.decimal_odds) / q.decimal_odds
+                # Midpoint relative spread: (Lay - Back) / ((Lay + Back) / 2)
+                spread = odds_math.relative_spread(q.decimal_odds, q.lay_odds)
                 if spread > max_spread:
                     log.debug("health_rejected", reason="spread_too_high",
                               selection=q.selection, spread=spread, max_spread=max_spread)
@@ -391,6 +394,8 @@ class ValueEngine:
                     edge=e,
                     recommended_stake=stake,
                     detected_at=now,
+                    is_live=is_live,
+                    event_start_time=target.start_time,
                     # Capture all selections' odds for Stoiximan-style 1X2 display
                     all_market_odds={q.selection: q.decimal_odds for q in target.quotes},
                 )

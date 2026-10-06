@@ -45,6 +45,24 @@ def midpoint_prob(back_odds: float, lay_odds: float) -> float:
     return (p_back + p_lay) / 2.0
 
 
+def relative_spread(back_odds: float, lay_odds: float) -> float:
+    """Calculate the relative back/lay spread as a fraction.
+    
+    Formula:
+        Spread% = |Lay - Back| / ((Lay + Back) / 2)
+        
+    Examples:
+        1.80 back, 1.81 lay -> (1.81 - 1.80) / 1.805 = 0.00554 (0.55% spread) -> excellent
+        1.80 back, 1.90 lay -> (1.90 - 1.80) / 1.850 = 0.05405 (5.41% spread) -> poor
+    """
+    if back_odds <= 1.0 or lay_odds <= 1.0:
+        return 0.0
+    midpoint = (lay_odds + back_odds) / 2.0
+    if midpoint <= 0:
+        return 0.0
+    return abs(lay_odds - back_odds) / midpoint
+
+
 def booksum(decimal_odds: list[float]) -> float:
     """Sum of implied probabilities across a market = 1 + overround."""
     return sum(implied_prob(o) for o in decimal_odds)

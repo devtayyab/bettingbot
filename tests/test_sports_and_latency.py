@@ -63,7 +63,7 @@ def test_market_liquidity_rejection():
         sport=Sport.BASKETBALL,
         status=MarketStatus.PREMATCH,
         start_time=now + timedelta(hours=1),
-        total_matched=5000.0,
+        total_matched=20000.0,
         quotes=[
             Quote("betfair", "Team A", 1.50, now, back_liquidity=1000.0, lay_odds=1.52, lay_liquidity=1000.0),
             Quote("betfair", "Team B", 3.00, now, back_liquidity=1000.0, lay_odds=3.05, lay_liquidity=1000.0),
@@ -77,7 +77,7 @@ def test_market_liquidity_rejection():
         sport=Sport.BASKETBALL,
         status=MarketStatus.PREMATCH,
         start_time=now + timedelta(hours=1),
-        total_matched=5000.0,
+        total_matched=20000.0,
         quotes=[
             Quote("stoiximan", "Team A", 1.80, now, back_liquidity=2.0),  # Low liquidity!
             Quote("stoiximan", "Team B", 2.80, now, back_liquidity=2.0),
@@ -114,7 +114,7 @@ def test_stale_odds_latency_rejection():
         sport=Sport.TENNIS,
         status=MarketStatus.LIVE,
         start_time=now,
-        total_matched=5000.0,
+        total_matched=20000.0,
         quotes=[
             Quote("betfair", "Player 1", 1.50, now, back_liquidity=1000.0, lay_odds=1.52, lay_liquidity=1000.0),
             Quote("betfair", "Player 2", 3.00, now, back_liquidity=1000.0, lay_odds=3.05, lay_liquidity=1000.0),
@@ -128,7 +128,7 @@ def test_stale_odds_latency_rejection():
         sport=Sport.TENNIS,
         status=MarketStatus.LIVE,
         start_time=now,
-        total_matched=5000.0,
+        total_matched=20000.0,
         quotes=[
             Quote("stoiximan", "Player 1", 1.80, stale_time, back_liquidity=500.0),  # Stale!
             Quote("stoiximan", "Player 2", 2.80, stale_time, back_liquidity=500.0),
@@ -151,3 +151,77 @@ def test_stale_odds_latency_rejection():
     engine = ValueEngine(SingleMock("betfair", ref_snap), SingleMock("pinnacle", ref_snap), [SingleMock("stoiximan", tgt_snap)], settings=settings)
     res = engine.scan(Sport.TENNIS, live=True)
     assert res.signals == [], "Expected live signal to be rejected due to stale latency (>3.0s)"
+
+
+def test_relative_spread_rejection():
+    now = datetime.now(UTC)
+    
+    # 1. Wide spread: 1.80 Back / 1.90 Lay -> Spread% is ~5.41%, exceeding 2.0% max_spread
+    wide_spread_ref = MarketSnapshot(
+        event_id="evt-spread",
+        market_id="m-spread",
+        market_type="MATCH_ODDS",
+        sport=Sport.SOCCER,
+        status=MarketStatus.PREMATCH,
+        start_time=now + timedelta(hours=2),
+        total_matched=25000.0,
+        quotes=[
+            Quote("betfair", "Team A", 1.80, now, back_liquidity=500.0, lay_odds=1.90, lay_liquidity=500.0),
+            Quote("betfair", "Draw", 3.50, now, back_liquidity=500.0, lay_odds=3.55, lay_liquidity=500.0),
+            Quote("betfair", "Team B", 4.50, now, back_liquidity=500.0, lay_odds=4.60, lay_liquidity=500.0),
+        ]
+    )
+    
+    target_snap = MarketSnapshot(
+        event_id="evt-spread",
+        market_id="m-spread",
+        market_type="MATCH_ODDS",
+        sport=Sport.SOCCER,
+        status=MarketStatus.PREMATCH,
+        start_time=now + timedelta(hours=2),
+        total_matched=25000.0,
+        quotes=[
+            Quote("stoiximan", "Team A", 2.10, now, back_liquidity=500.0),
+            Quote("stoiximan", "Draw", 3.40, now, back_liquidity=500.0),
+            Quote("stoiximan", "Team B", 4.30, now, back_liquidity=500.0),
+        ]
+    )
+    
+    class SingleMock:
+        def __init__(self, name, snap):
+            self.name = name
+            self.snap = snap
+        def fetch_markets(self, sport, live=False):
+            return [self.snap]
+
+    settings = Settings(
+        max_spread=0.02,
+        min_total_matched=10000.0,
+        min_liquidity=100.0,
+        sport_overrides={
+            "soccer": {"max_spread": 0.02, "min_total_matched": 10000.0, "min_liquidity": 100.0}
+        }
+    )
+    
+    engine = ValueEngine(SingleMock("betfair", wide_spread_ref), SingleMock("pinnacle", wide_spread_ref), [SingleMock("stoiximan", target_snap)], settings=settings)
+    res = engine.scan(Sport.SOCCER)
+    assert res.signals == [], "Expected wide spread (5.4% > 2.0%) market to be rejected"
+
+    # 2. Tight spread: 1.80 Back / 1.81 Lay -> Spread% is ~0.55% <= 2.0% max_spread
+    tight_spread_ref = MarketSnapshot(
+        event_id="evt-spread",
+        market_id="m-spread",
+        market_type="MATCH_ODDS",
+        sport=Sport.SOCCER,
+        status=MarketStatus.PREMATCH,
+        start_time=now + timedelta(hours=2),
+        total_matched=25000.0,
+        quotes=[
+            Quote("betfair", "Team A", 1.80, now, back_liquidity=500.0, lay_odds=1.81, lay_liquidity=500.0),
+            Quote("betfair", "Draw", 3.50, now, back_liquidity=500.0, lay_odds=3.55, lay_liquidity=500.0),
+            Quote("betfair", "Team B", 4.50, now, back_liquidity=500.0, lay_odds=4.55, lay_liquidity=500.0),
+        ]
+    )
+    engine_tight = ValueEngine(SingleMock("betfair", tight_spread_ref), SingleMock("pinnacle", tight_spread_ref), [SingleMock("stoiximan", target_snap)], settings=settings)
+    res_tight = engine_tight.scan(Sport.SOCCER)
+    assert len(res_tight.signals) > 0, "Expected tight spread (0.55% <= 2.0%) market to generate signals"

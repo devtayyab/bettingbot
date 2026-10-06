@@ -190,8 +190,12 @@ class ConfigUpdateIn(BaseModel):
     placement_require_approval: bool | None = None
     require_confirmation: bool | None = None
     enable_pinnacle_confirmation: bool | None = None
+    require_score_sync: bool | None = None
     min_odds: float | None = None
     max_odds: float | None = None
+    min_total_matched: float | None = None
+    min_liquidity: float | None = None
+    max_spread: float | None = None
     poll_interval_live: int | None = None
     poll_interval_prematch: int | None = None
     allow_demo_fallback: bool | None = None
@@ -240,6 +244,30 @@ def _to_out(s: Signal) -> SignalOut:
     except Exception:
         pass
 
+    # Ensure Home=1, Draw=X, Away=2 ordering even for legacy signals
+    h_odds = s.home_odds
+    d_odds = s.draw_odds
+    a_odds = s.away_odds
+
+    if all_market_odds:
+        draw_item = next(
+            (item for item in all_market_odds.items() if item[0].strip().lower() in ("draw", "tie", "x")),
+            None,
+        )
+        team_items = [
+            item for item in all_market_odds.items() if item[0].strip().lower() not in ("draw", "tie", "x")
+        ]
+        if draw_item and len(team_items) >= 2:
+            # Reorder dict so keys are strictly [Home, Draw, Away]
+            all_market_odds = {
+                team_items[0][0]: team_items[0][1],
+                draw_item[0]: draw_item[1],
+                team_items[1][0]: team_items[1][1],
+            }
+            h_odds = team_items[0][1]
+            d_odds = draw_item[1]
+            a_odds = team_items[1][1]
+
     return SignalOut(
         id=s.id,
         event_id=s.event_id,
@@ -261,9 +289,9 @@ def _to_out(s: Signal) -> SignalOut:
         pinnacle_odds=pin_odds,
         target_bookmaker="stoiximan",
         bet_type=btype,
-        home_odds=s.home_odds,
-        draw_odds=s.draw_odds,
-        away_odds=s.away_odds,
+        home_odds=h_odds,
+        draw_odds=d_odds,
+        away_odds=a_odds,
         all_market_odds=all_market_odds,
     )
 
@@ -351,6 +379,7 @@ def get_config() -> dict:
         "max_spread": s.max_spread,
         "require_confirmation": s.require_confirmation,
         "enable_pinnacle_confirmation": s.enable_pinnacle_confirmation,
+        "require_score_sync": s.require_score_sync,
         "min_odds": s.min_odds,
         "max_odds": s.max_odds,
         "favorite_min_prob": s.favorite_min_prob,

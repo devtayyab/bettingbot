@@ -33,15 +33,18 @@ class Settings(BaseSettings):
     edge_threshold: float = Field(default=0.01, ge=0, le=1)
     live_edge_threshold: float = Field(default=0.03, ge=0, le=1)
     confirmation_tolerance: float = Field(default=0.15, ge=0, le=1)
-    max_live_latency_seconds: float = Field(default=3.0, gt=0)
+    max_live_latency_seconds: float = Field(default=60.0, gt=0)
     max_prematch_latency_seconds: float = Field(default=300.0, gt=0)
-    # Market Health
-    min_total_matched: float = Field(default=1000.0, ge=0)
-    min_liquidity: float = Field(default=10.0, ge=0)
-    max_spread: float = Field(default=0.10, ge=0, le=1)
+    # Market Health (Betfair Quality Filters)
+    min_total_matched: float = Field(default=10000.0, ge=0)
+    min_liquidity: float = Field(default=100.0, ge=0)
+    max_spread: float = Field(default=0.02, ge=0, le=1)
     # When true, a signal requires a matching Pinnacle price; never bet on Betfair alone.
     require_confirmation: bool = False
     enable_pinnacle_confirmation: bool = False
+    # When true, drop live markets if real-time Betfair/Stoiximan score feeds cannot be matched.
+    # Set to false when using third-party odds APIs (e.g. The Odds API) without direct score scraping.
+    require_score_sync: bool = False
     min_odds: float = Field(default=1.01, ge=1.0)
     max_odds: float = Field(default=6.0, gt=1.0)
     favorite_min_prob: float = Field(default=0.10, ge=0, le=1)
@@ -53,23 +56,23 @@ class Settings(BaseSettings):
     # Dynamic Sport Overrides (JSON string mapped to dict)
     sport_overrides: dict[str, dict] = Field(
         default_factory=lambda: {
-            "soccer": {"edge_threshold": 0.01, "min_total_matched": 1000.0, "max_spread": 0.10, "min_liquidity": 10.0},
-            "tennis": {"edge_threshold": 0.01, "min_total_matched": 500.0, "max_spread": 0.12, "min_liquidity": 10.0},
-            "basketball": {"edge_threshold": 0.01, "min_total_matched": 1000.0, "max_spread": 0.10, "min_liquidity": 10.0},
-            "american_football": {"edge_threshold": 0.01, "min_total_matched": 1000.0, "max_spread": 0.10, "min_liquidity": 10.0},
-            "baseball": {"edge_threshold": 0.01, "min_total_matched": 500.0, "max_spread": 0.12, "min_liquidity": 10.0},
-            "ice_hockey": {"edge_threshold": 0.01, "min_total_matched": 500.0, "max_spread": 0.12, "min_liquidity": 10.0},
-            "cricket": {"edge_threshold": 0.01, "min_total_matched": 500.0, "max_spread": 0.12, "min_liquidity": 10.0},
-            "rugby_league": {"edge_threshold": 0.015, "min_total_matched": 250.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "rugby_union": {"edge_threshold": 0.015, "min_total_matched": 250.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "golf": {"edge_threshold": 0.015, "min_total_matched": 250.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "mma": {"edge_threshold": 0.015, "min_total_matched": 250.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "boxing": {"edge_threshold": 0.015, "min_total_matched": 250.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "volleyball": {"edge_threshold": 0.02, "min_total_matched": 100.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "handball": {"edge_threshold": 0.02, "min_total_matched": 100.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "darts": {"edge_threshold": 0.02, "min_total_matched": 100.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "esports": {"edge_threshold": 0.02, "min_total_matched": 100.0, "max_spread": 0.15, "min_liquidity": 5.0},
-            "table_tennis": {"edge_threshold": 0.02, "min_total_matched": 50.0, "max_spread": 0.20, "min_liquidity": 5.0},
+            "soccer": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "tennis": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "basketball": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "american_football": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "baseball": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "ice_hockey": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "cricket": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
+            "rugby_league": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
+            "rugby_union": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
+            "golf": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
+            "mma": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
+            "boxing": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
+            "volleyball": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
+            "handball": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
+            "darts": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
+            "esports": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
+            "table_tennis": {"edge_threshold": 0.02, "min_total_matched": 1000.0, "max_spread": 0.03, "min_liquidity": 25.0},
         }
     )
 
@@ -89,8 +92,8 @@ class Settings(BaseSettings):
         }
 
     # Cadence
-    poll_interval_live: int = 120
-    poll_interval_prematch: int = 900
+    poll_interval_live: int = 300
+    poll_interval_prematch: int = 1800
 
     # Placement (single account)
     # Notifications
