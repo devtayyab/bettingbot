@@ -128,6 +128,8 @@ class ValueSignal:
     edge: float                    # expected ROI per unit stake at target_odds
     recommended_stake: float
     detected_at: datetime
+    is_live: bool = False
+    event_start_time: datetime | None = None
     # All selections' odds from the target market (e.g. home/draw/away for 1X2).
     # Enables the Stoiximan-style 3-box display: {"Iceland": 1.29, "Draw": 5.40, "Estonia": 11.50}
     all_market_odds: dict[str, float] | None = None

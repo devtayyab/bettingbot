@@ -16,6 +16,7 @@ from valuebet.core.odds_math import (
     kelly_stake,
     midpoint_prob,
     overround,
+    relative_spread,
 )
 
 
@@ -42,6 +43,19 @@ def test_midpoint_prob_rejects_invalid():
         midpoint_prob(0.5, 2.0)
     with pytest.raises(ValueError):
         midpoint_prob(2.0, 0.5)
+
+
+def test_relative_spread():
+    # 1.80 / 1.81 -> (1.81 - 1.80) / 1.805 ~= 0.00554 (0.55% spread) -> excellent
+    assert relative_spread(1.80, 1.81) == pytest.approx(0.01 / 1.805)
+    # 1.80 / 1.90 -> (1.90 - 1.80) / 1.85 ~= 0.05405 (5.41% spread) -> poor
+    assert relative_spread(1.80, 1.90) == pytest.approx(0.10 / 1.85)
+    # Equal odds -> 0% spread
+    assert relative_spread(2.0, 2.0) == 0.0
+    # Inverted odds -> abs difference used
+    assert relative_spread(1.81, 1.80) == pytest.approx(0.01 / 1.805)
+    # Invalid odds <= 1.0 -> 0.0
+    assert relative_spread(0.9, 1.5) == 0.0
 
 
 def test_overround_and_booksum():

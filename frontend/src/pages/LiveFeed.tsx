@@ -33,15 +33,6 @@ function formatDelta(fair: number, confirm: number | null) {
   return diff >= 0 ? `+${formatted}%` : `${formatted}%`;
 }
 
-function formatTime(iso: string | null) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return iso;
-  }
-}
-
 function formatDateTime(iso: string | null) {
   if (!iso) return '—';
   try {
@@ -85,34 +76,51 @@ interface OddsBoxesProps {
   marketType: string;
 }
 
-function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelection, marketType }: OddsBoxesProps) {
-  // Build the list of (label, odds, isSelected) from all_market_odds if available,
-  // otherwise fall back to the home/draw/away individual columns.
-  type OddsEntry = { label: string; odds: number; isSelected: boolean; key: string };
+function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelection, marketType: _marketType }: OddsBoxesProps) {
+  type OddsEntry = { label: string; odds: number; isSelected: boolean; key: string; boxLabel: string };
   let entries: OddsEntry[] = [];
 
+  const isDraw = (label: string) => {
+    const l = label.trim().toLowerCase();
+    return l === 'draw' || l === 'tie' || l === 'x' || l === 'empate' || l === 'isopalia';
+  };
+
   if (allMarketOdds && Object.keys(allMarketOdds).length > 0) {
-    entries = Object.entries(allMarketOdds).map(([sel, odds]) => ({
+    const raw = Object.entries(allMarketOdds).map(([sel, odds]) => ({
       key: sel,
       label: sel,
       odds,
       isSelected: sel.toLowerCase() === selectedSelection.toLowerCase(),
     }));
-  } else if (homeOdds != null || drawOdds != null || awayOdds != null) {
-    const mt = marketType.toUpperCase();
-    const is1x2 = mt.includes('1X2') || mt.includes('MATCH_ODDS') || mt.includes('H2H');
-    if (is1x2) {
-      if (homeOdds != null) entries.push({ key: '1', label: '1', odds: homeOdds, isSelected: false });
-      if (drawOdds != null) entries.push({ key: 'X', label: 'X', odds: drawOdds, isSelected: false });
-      if (awayOdds != null) entries.push({ key: '2', label: '2', odds: awayOdds, isSelected: false });
+
+    if (raw.length === 3) {
+      // Find the draw entry
+      const drawIdx = raw.findIndex((e) => isDraw(e.label));
+      if (drawIdx !== -1) {
+        const drawEntry = { ...raw[drawIdx], boxLabel: 'X' };
+        const teamEntries = raw.filter((_, idx) => idx !== drawIdx);
+        // Box 1 = Home Team ('1'), Box 2 = Draw ('X'), Box 3 = Away Team ('2')
+        entries = [
+          { ...teamEntries[0], boxLabel: '1' },
+          drawEntry,
+          { ...teamEntries[1], boxLabel: '2' },
+        ];
+      } else {
+        entries = raw.map((e, idx) => ({ ...e, boxLabel: idx === 0 ? '1' : idx === 1 ? 'X' : '2' }));
+      }
+    } else if (raw.length === 2) {
+      entries = raw.map((e, idx) => ({ ...e, boxLabel: idx === 0 ? '1' : '2' }));
+    } else {
+      entries = raw.map((e) => ({ ...e, boxLabel: e.label.length > 8 ? e.label.slice(0, 7) + '…' : e.label }));
     }
+  } else if (homeOdds != null || drawOdds != null || awayOdds != null) {
+    const selNorm = selectedSelection.trim().toLowerCase();
+    if (homeOdds != null) entries.push({ key: '1', label: '1', boxLabel: '1', odds: homeOdds, isSelected: selNorm === '1' || selNorm === 'home' });
+    if (drawOdds != null) entries.push({ key: 'X', label: 'X', boxLabel: 'X', odds: drawOdds, isSelected: isDraw(selNorm) });
+    if (awayOdds != null) entries.push({ key: '2', label: '2', boxLabel: '2', odds: awayOdds, isSelected: selNorm === '2' || selNorm === 'away' });
   }
 
   if (entries.length === 0) return null;
-
-  // For 3-way markets label 1/X/2 if labels are team names
-  const is3way = entries.length === 3;
-  const labels = is3way ? ['1', 'X', '2'] : null;
 
   return (
     <div style={{
@@ -121,7 +129,7 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
       margin: '8px 0',
       flexWrap: 'wrap',
     }}>
-      {entries.map((entry, idx) => {
+      {entries.map((entry) => {
         const selected = entry.isSelected;
         return (
           <div
@@ -146,7 +154,7 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
               transition: 'all 0.15s ease',
             }}
           >
-            {/* Position label (1/X/2) */}
+            {/* Position label (1 / X / 2) */}
             <span style={{
               fontSize: '0.62rem',
               color: selected ? '#38bdf8' : 'var(--text-muted)',
@@ -155,7 +163,7 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
               textTransform: 'uppercase',
               marginBottom: '1px',
             }}>
-              {labels ? labels[idx] : (entry.label.length > 12 ? entry.label.slice(0, 11) + '…' : entry.label)}
+              {entry.boxLabel}
             </span>
             {/* Decimal odds */}
             <span style={{
@@ -166,21 +174,19 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
             }}>
               {entry.odds.toFixed(2).replace('.', ',')}
             </span>
-            {/* Team name (tooltip-style, truncated) */}
-            {labels && (
-              <span style={{
-                fontSize: '0.58rem',
-                color: selected ? 'rgba(56,189,248,0.8)' : 'var(--text-muted)',
-                marginTop: '1px',
-                maxWidth: '72px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                textAlign: 'center',
-              }}>
-                {entry.label}
-              </span>
-            )}
+            {/* Team or Draw name */}
+            <span style={{
+              fontSize: '0.58rem',
+              color: selected ? 'rgba(56,189,248,0.8)' : 'var(--text-muted)',
+              marginTop: '1px',
+              maxWidth: '72px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              textAlign: 'center',
+            }}>
+              {entry.label}
+            </span>
           </div>
         );
       })}
@@ -240,12 +246,18 @@ export const LiveFeed: React.FC = () => {
     ...(localSignals.get(s.id) ?? {}),
   }));
 
-  const filtered = mergedSignals.filter((s) => {
-    if (sportFilter && s.sport !== sportFilter) return false;
-    if (marketFilter === 'live' && !s.is_live) return false;
-    if (marketFilter === 'prematch' && s.is_live) return false;
-    return true;
-  });
+  const filtered = mergedSignals
+    .filter((s) => {
+      if (sportFilter && s.sport !== sportFilter) return false;
+      if (marketFilter === 'live' && !s.is_live) return false;
+      if (marketFilter === 'prematch' && s.is_live) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
+      const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
+      return timeB - timeA; // newest found first
+    });
 
   const toggleExpand = (id: number) => {
     setExpandedIds((prev) => {
@@ -512,13 +524,13 @@ export const LiveFeed: React.FC = () => {
                 </div>
 
                 {/* Timestamps */}
-                <div className="bet-card__timestamps" style={{ margin: '6px 0 0 0', padding: '6px 0 0 0' }}>
-                  <span title="When the bet opportunity was identified">
+                <div className="bet-card__timestamps" style={{ margin: '6px 0 0 0', padding: '6px 0 0 0', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                  <span title="Date and time when the bet was found">
                     🔍 Found: {formatDateTime(s.detected_at)}
                   </span>
                   {s.event_start_time && (
-                    <span title="Event start time">
-                      ⏱ Event: {formatTime(s.event_start_time)}
+                    <span title="Date and time when the event will occur">
+                      ⏱ Event: {formatDateTime(s.event_start_time)}
                     </span>
                   )}
                 </div>

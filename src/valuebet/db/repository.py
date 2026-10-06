@@ -101,26 +101,34 @@ def save_signal(session: Session, sig: ValueSignal) -> Signal | None:
         recommended_stake=sig.recommended_stake,
         status="detected",
         detected_at=sig.detected_at,
-        is_live=False,
+        is_live=sig.is_live,
+        event_start_time=sig.event_start_time,
         variables_complete=True,
     )
     # Populate 3-box odds display from all_market_odds
     if sig.all_market_odds:
-        odds_list = list(sig.all_market_odds.items())  # ordered as returned by the source
-        # Store JSON for full fidelity
-        row.all_market_odds_json = json.dumps(sig.all_market_odds)
-        # For 1X2 / MATCH_ODDS markets assign home / draw / away by position
-        mt = (sig.market_type or "").upper()
-        if "1X2" in mt or "MATCH_ODDS" in mt or "H2H" in mt:
-            if len(odds_list) >= 1:
-                row.home_odds = odds_list[0][1]
-            if len(odds_list) >= 2:
-                # Middle entry is draw for 3-way markets, otherwise skip
-                row.draw_odds = odds_list[1][1] if len(odds_list) == 3 else None
-            if len(odds_list) >= 3:
-                row.away_odds = odds_list[2][1]
-            elif len(odds_list) == 2:
-                row.away_odds = odds_list[1][1]  # head-to-head (no draw)
+        # Separate draw from teams so Home=1, Draw=X, Away=2
+        draw_item = next(
+            (item for item in sig.all_market_odds.items() if item[0].strip().lower() in ("draw", "tie", "x")),
+            None,
+        )
+        team_items = [
+            item for item in sig.all_market_odds.items() if item[0].strip().lower() not in ("draw", "tie", "x")
+        ]
+
+        ordered_odds: dict[str, float] = {}
+        if len(team_items) >= 1:
+            ordered_odds[team_items[0][0]] = team_items[0][1]
+            row.home_odds = team_items[0][1]
+        if draw_item:
+            ordered_odds[draw_item[0]] = draw_item[1]
+            row.draw_odds = draw_item[1]
+        if len(team_items) >= 2:
+            ordered_odds[team_items[1][0]] = team_items[1][1]
+            row.away_odds = team_items[1][1]
+
+        # Store JSON with standard [Home, Draw, Away] ordering
+        row.all_market_odds_json = json.dumps(ordered_odds or sig.all_market_odds)
     session.add(row)
     session.flush()
     log.info(
@@ -138,7 +146,7 @@ def save_signal(session: Session, sig: ValueSignal) -> Signal | None:
 
 
 def open_signals(session: Session, status: str | None = None) -> list[Signal]:
-    stmt = select(Signal).order_by(Signal.edge.desc())
+    stmt = select(Signal).order_by(Signal.detected_at.desc(), Signal.id.desc())
     if status:
         # Specific status query (e.g. executor looking for "approved")
         stmt = stmt.where(Signal.status == status)

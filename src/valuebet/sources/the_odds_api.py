@@ -84,14 +84,47 @@ _SPORT_KEYS = {
     Sport.HANDBALL: ["handball_champions_league"],
     Sport.DARTS: ["darts_pdc_world_championship"],
     Sport.ESPORTS: ["csgo_esl", "dota2_international"],
-    Sport.TABLE_TENNIS: ["table_tennis"],
+    Sport.TABLE_TENNIS: [],
 }
 
 
 import time
 
 _ODDS_CACHE: dict[str, tuple[float, list[dict], str | None, str | None]] = {}
-_ODDS_CACHE_TTL = 60.0
+_ODDS_CACHE_TTL = 180.0  # 3 minutes cache across sources
+
+_ACTIVE_SPORTS_CACHE: tuple[float, set[str]] | None = None
+_ACTIVE_SPORTS_TTL = 1800.0  # 30 minutes
+
+
+def _get_active_sport_keys(client: httpx.Client, api_key: str) -> set[str]:
+    """Query /v4/sports/ (FREE, 0 quota credits) to get the list of currently active leagues."""
+    global _ACTIVE_SPORTS_CACHE
+    now = time.time()
+    if _ACTIVE_SPORTS_CACHE and (now - _ACTIVE_SPORTS_CACHE[0]) < _ACTIVE_SPORTS_TTL:
+        return _ACTIVE_SPORTS_CACHE[1]
+
+    try:
+        res = client.get("/sports/", params={"apiKey": api_key})
+        if res.status_code == 200:
+            data = res.json()
+            active_keys = {
+                item.get("key", "")
+                for item in data
+                if item.get("active") and not item.get("has_outrights")
+            }
+            active_keys.discard("")
+            _ACTIVE_SPORTS_CACHE = (now, active_keys)
+            log.info("the_odds_api_active_sports_updated", count=len(active_keys))
+            return active_keys
+        else:
+            log.warning("the_odds_api_sports_check_failed", status=res.status_code)
+    except Exception as exc:
+        log.warning("the_odds_api_sports_check_error", error=str(exc))
+
+    if _ACTIVE_SPORTS_CACHE:
+        return _ACTIVE_SPORTS_CACHE[1]
+    return set()
 
 
 class TheOddsAPISource:
@@ -109,6 +142,16 @@ class TheOddsAPISource:
             return []
 
         sport_keys = _SPORT_KEYS.get(sport, ["upcoming"])
+        if not sport_keys:
+            return []
+
+        # Check free active sports list to avoid burning quota on off-season/inactive leagues
+        active_keys = _get_active_sport_keys(self._client, api_key)
+        if active_keys:
+            sport_keys = [k for k in sport_keys if k in active_keys]
+            if not sport_keys:
+                return []
+
         snapshots: list[MarketSnapshot] = []
         now = datetime.now(UTC)
         # Diagnostics: distinguish "the API returned nothing" from "our bookmaker
@@ -166,6 +209,13 @@ class TheOddsAPISource:
                 away_team = ev.get("away_team", "Away")
                 start_time = _parse_commence_time(ev.get("commence_time")) or now
                 
+                # In-play distinction: match commenced and within reasonable window (< 4 hours)
+                is_in_play = (start_time <= now) and ((now - start_time).total_seconds() < 4 * 3600)
+                if live and not is_in_play:
+                    continue
+                if not live and is_in_play:
+                    continue
+
                 # Look for our target bookmaker in the event's bookmakers list
                 bookmakers = ev.get("bookmakers", [])
                 events_seen += 1
@@ -216,7 +266,7 @@ class TheOddsAPISource:
                         market_id=f"oddsapi-{event_id}",
                         market_type="MATCH_ODDS",
                         sport=sport,
-                        status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
+                        status=MarketStatus.LIVE if is_in_play else MarketStatus.PREMATCH,
                         start_time=start_time,
                         # The Odds API exposes no volume or book depth. These
                         # stay None rather than being invented: a hard-coded
