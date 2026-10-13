@@ -35,6 +35,10 @@ class ScoreTracker(Protocol):
         """Fetch the live state for a given event on a given source."""
         ...
 
+    def clear_cache(self) -> None:
+        """Flush cached event states."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Feature 1: Real Betfair Score Tracker
@@ -241,7 +245,8 @@ class CompositeScoreTracker:
 
     def clear_cache(self) -> None:
         for t in self._trackers.values():
-            t.clear_cache()
+            if hasattr(t, "clear_cache"):
+                t.clear_cache()
 
     def get_state(self, event_id: str, source: str) -> EventState | None:
         tracker = self._trackers.get(source)
@@ -261,6 +266,10 @@ class DummyScoreTracker:
     Always returns 0-0 1H so the pipeline can run end-to-end without a real
     data provider. DO NOT use in production (ENV=prod).
     """
+    def clear_cache(self) -> None:
+        """No-op cache flush for dummy tracker."""
+        pass
+
     def get_state(self, event_id: str, source: str) -> EventState | None:
         return EventState(home_score=0, away_score=0, period="1H",
                           clock_seconds=60, is_suspended=False)

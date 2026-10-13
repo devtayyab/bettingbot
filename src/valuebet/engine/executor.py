@@ -177,7 +177,9 @@ class Executor:
                     if res.verified_on_platform:
                         placed_count += 1
                         tally("placed_verified")
-                        self.notifier.notify_bet_placed(sig.selection, res.placed_odds, res.stake)
+                        self.notifier.notify_bet_placed(
+                            sig.selection, res.placed_odds or sig.target_odds, res.stake
+                        )
                     else:
                         tally("unconfirmed")
                         log.error("bet_unverified_at_bookmaker",
@@ -189,10 +191,11 @@ class Executor:
                         )
                     continue
 
+                status_str = res.status.value if res.status is not None else "failed"
                 log.warning("placement_failed", selection=sig.selection,
-                            status=res.status.value, msg=res.message)
+                            status=status_str, msg=res.message)
                 sig.status = "failed"
-                tally(f"failed_{res.status.value}")
+                tally(f"failed_{status_str}")
                 if res.status == PlacementStatus.REJECTED:
                     save_limit_event(
                         session, bookmaker=bookmaker_name,
