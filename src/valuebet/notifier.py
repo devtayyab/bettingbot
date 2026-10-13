@@ -57,14 +57,15 @@ class Notifier:
         )
         self._send_message(text)
 
-    def notify_bet_placed(self, selection: str, odds: float, stake: float) -> None:
+    def notify_bet_placed(self, selection: str, odds: float | None, stake: float) -> None:
         if not self.enabled:
             return
             
+        odds_str = f"{odds}" if odds is not None else "N/A"
         text = (
             f"✅ <b>Bet Placed!</b>\n\n"
             f"<b>Selection:</b> {selection}\n"
-            f"<b>Odds:</b> {odds}\n"
+            f"<b>Odds:</b> {odds_str}\n"
             f"<b>Stake:</b> €{stake:.2f}"
         )
         self._send_message(text)
