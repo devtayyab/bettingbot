@@ -844,15 +844,77 @@ def all_bookmaker_limit_summaries(session: Session) -> list[dict]:
 
 
 def settle_pending_bets(session: Session) -> int:
-    """Auto-settle bets from a real result feed.
+    """Auto-settle pending bets against real match results from The Odds API scores."""
+    from ..core.results import TheOddsAPIResultResolver, BetOutcome
 
-    Intentionally a no-op: the only resolver in the codebase is MockResultResolver,
-    which invents scores with random.randint. Wiring that into the scheduler would
-    write fabricated wins, losses and profit into the bets table and report them as
-    realised P&L. Settlement is manual (POST /bets/{id}/settle) until a real
-    results feed is integrated here.
-    """
-    return 0
+    stmt = (
+        select(Bet, Signal)
+        .join(Signal, Bet.signal_id == Signal.id)
+        .where(Bet.outcome == "pending")
+    )
+    rows = session.execute(stmt).all()
+    if not rows:
+        return 0
+
+    resolver = TheOddsAPIResultResolver()
+    # Group pending bets by sport
+    bets_by_sport: dict[str, list[tuple[Bet, Signal]]] = {}
+    for bet, sig in rows:
+        bets_by_sport.setdefault(sig.sport, []).append((bet, sig))
+
+    settled_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for sport_str, bet_pairs in bets_by_sport.items():
+        events = resolver.fetch_scores_for_sport(sport_str)
+        if not events:
+            continue
+
+        for bet, sig in bet_pairs:
+            matched_event = None
+            for ev in events:
+                if not ev.get("completed"):
+                    continue
+                ev_id = _safe_event_id(ev.get("id", ""))
+                home_team = ev.get("home_team", "")
+                away_team = ev.get("away_team", "")
+
+                if ev_id == sig.event_id or (
+                    home_team.lower() in sig.selection.lower() or away_team.lower() in sig.selection.lower()
+                ):
+                    matched_event = ev
+                    break
+
+            if not matched_event:
+                continue
+
+            outcome = resolver.determine_match_outcome(
+                selection=bet.selection,
+                home_team=matched_event.get("home_team", ""),
+                away_team=matched_event.get("away_team", ""),
+                scores=matched_event.get("scores", []),
+            )
+
+            if outcome in (BetOutcome.WON, BetOutcome.LOST, BetOutcome.VOID):
+                bet.outcome = outcome.value
+                if outcome == BetOutcome.WON:
+                    bet.profit = round(bet.stake * (bet.placed_odds - 1), 2)
+                elif outcome == BetOutcome.LOST:
+                    bet.profit = -bet.stake
+                else:
+                    bet.profit = 0.0
+
+                sig.status = "settled"
+                clean_note = bet.note or ""
+                scores_summary = str(matched_event.get("scores", []))
+                bet.note = f"settled_at:{now_iso} auto_settled_by:the_odds_api scores:{scores_summary} {clean_note}".strip()
+                settled_count += 1
+                log.info("bet_auto_settled", bet_id=bet.id, selection=bet.selection,
+                         outcome=bet.outcome, profit=bet.profit)
+
+    if settled_count > 0:
+        session.flush()
+    return settled_count
 
 
 # ---------------------------------------------------------------------------

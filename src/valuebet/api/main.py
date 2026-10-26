@@ -890,6 +890,15 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
         return {"bet_id": bet_id, "outcome": body.outcome, "profit": bet.profit, "settled_at": now_iso}
 
 
+@app.post("/bets/settle-all")
+def trigger_settle_all() -> dict:
+    """Trigger auto-settlement of pending bets using The Odds API match scores."""
+    from ..db.repository import settle_pending_bets
+    with session_scope() as session:
+        settled = settle_pending_bets(session)
+    return {"settled": settled, "message": f"Successfully settled {settled} bets"}
+
+
 @app.get("/results")
 def get_results(
     outcome: str | None = None,
