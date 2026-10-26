@@ -72,6 +72,10 @@ class Quote:
     back_liquidity: float | None = None
     lay_liquidity: float | None = None
     # For fixed-odds, we might still just use back_liquidity as available stake.
+    # Exchange ladders, best price first: ((price, size), ...). Optional — when
+    # absent, depth checks fall back to back_liquidity / lay_liquidity.
+    back_ladder: tuple[tuple[float, float], ...] | None = None
+    lay_ladder: tuple[tuple[float, float], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -133,3 +137,7 @@ class ValueSignal:
     # All selections' odds from the target market (e.g. home/draw/away for 1X2).
     # Enables the Stoiximan-style 3-box display: {"Iceland": 1.29, "Draw": 5.40, "Estonia": 11.50}
     all_market_odds: dict[str, float] | None = None
+    # Betfair reference market-quality score (0..1, discounted for missing data)
+    # and the total edge that was required (base threshold + uncertainty buffer).
+    market_quality: float | None = None
+    required_edge: float | None = None

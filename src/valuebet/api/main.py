@@ -196,9 +196,22 @@ class ConfigUpdateIn(BaseModel):
     min_total_matched: float | None = None
     min_liquidity: float | None = None
     max_spread: float | None = None
+    strong_total_matched: float | None = None
+    strong_liquidity: float | None = None
+    good_spread: float | None = None
+    depth_band: float | None = None
+    betfair_ladder_levels: int | None = None
+    min_market_quality: float | None = None
+    enable_edge_buffer: bool | None = None
+    slippage_buffer: float | None = None
+    live_slippage_buffer: float | None = None
+    quality_penalty_max: float | None = None
+    unknown_spread_prob: float | None = None
     poll_interval_live: int | None = None
     poll_interval_prematch: int | None = None
     allow_demo_fallback: bool | None = None
+    odds_api_fetch_lay: bool | None = None
+    sport_overrides: dict[str, dict] | None = None
 
 
 class OddsApiKeyIn(BaseModel):
@@ -377,6 +390,17 @@ def get_config() -> dict:
         "min_total_matched": s.min_total_matched,
         "min_liquidity": s.min_liquidity,
         "max_spread": s.max_spread,
+        "strong_total_matched": s.strong_total_matched,
+        "strong_liquidity": s.strong_liquidity,
+        "good_spread": s.good_spread,
+        "depth_band": s.depth_band,
+        "betfair_ladder_levels": s.betfair_ladder_levels,
+        "min_market_quality": s.min_market_quality,
+        "enable_edge_buffer": s.enable_edge_buffer,
+        "slippage_buffer": s.slippage_buffer,
+        "live_slippage_buffer": s.live_slippage_buffer,
+        "quality_penalty_max": s.quality_penalty_max,
+        "unknown_spread_prob": s.unknown_spread_prob,
         "require_confirmation": s.require_confirmation,
         "enable_pinnacle_confirmation": s.enable_pinnacle_confirmation,
         "require_score_sync": s.require_score_sync,
@@ -394,6 +418,7 @@ def get_config() -> dict:
         "allow_demo_fallback": s.allow_demo_fallback,
         "placement_bookmaker": s.placement_bookmaker,
         "sport_overrides": s.sport_overrides,
+        "odds_api_fetch_lay": s.odds_api_fetch_lay,
     }
 
 
@@ -539,8 +564,15 @@ def patch_config(body: ConfigUpdateIn) -> dict:
     updates: dict[str, Any] = {
         k: v for k, v in body.model_dump().items() if v is not None
     }
-    env_map = {k.upper(): str(v).lower() if isinstance(v, bool) else str(v)
-               for k, v in updates.items()}
+    import json as _json
+    env_map = {}
+    for k, v in updates.items():
+        if isinstance(v, bool):
+            env_map[k.upper()] = str(v).lower()
+        elif isinstance(v, (dict, list)):
+            env_map[k.upper()] = _json.dumps(v)
+        else:
+            env_map[k.upper()] = str(v)
 
     new_lines = []
     updated_keys = set()
