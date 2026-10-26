@@ -161,8 +161,14 @@ class TheOddsAPISource:
         events_without_h2h = 0
         books_available: set[str] = set()
 
+        # Exchanges (betfair_ex_*) also publish lay prices as the "h2h_lay"
+        # market. Without them the Betfair reference is one-sided: no midpoint
+        # probability and no back/lay spread check. Costs one extra quota credit
+        # per region per request, shared by every source through the cache.
+        markets = "h2h,h2h_lay" if self._settings.odds_api_fetch_lay else "h2h"
+
         for sport_key in sport_keys:
-            cache_key = f"{sport_key}:eu,uk:h2h"
+            cache_key = f"{sport_key}:eu,uk:{markets}"
             cached = _ODDS_CACHE.get(cache_key)
             if cached and (time.time() - cached[0]) < _ODDS_CACHE_TTL:
                 events = cached[1]
@@ -175,7 +181,7 @@ class TheOddsAPISource:
                         params={
                             "apiKey": api_key,
                             "regions": "eu,uk",
-                            "markets": "h2h",
+                            "markets": markets,
                             "oddsFormat": "decimal",
                         },
                     )
@@ -238,19 +244,41 @@ class TheOddsAPISource:
                     events_without_h2h += 1
                     continue
 
+                # Lay prices by outcome name (exchanges only). A lay at or below
+                # the back price is a crossed/stale book — ignore it.
+                lay_market = next(
+                    (m for m in target_bm.get("markets", []) if m.get("key") == "h2h_lay"),
+                    None,
+                )
+                lay_by_name: dict[str, float] = {}
+                if lay_market:
+                    for outcome in lay_market.get("outcomes", []):
+                        lname, lprice = outcome.get("name"), outcome.get("price")
+                        if lname and lprice:
+                            try:
+                                lay_by_name[lname] = float(lprice)
+                            except (TypeError, ValueError):
+                                continue
+
                 quotes: list[Quote] = []
                 for outcome in h2h_market.get("outcomes", []):
                     name = outcome.get("name")
                     price = outcome.get("price")
                     if not name or not price:
                         continue
+
+                    back = float(price)
+                    lay = lay_by_name.get(name)
+                    if lay is not None and (lay <= 1.0 or lay < back):
+                        lay = None
                     
                     quotes.append(
                         Quote(
                             source=self.name,
                             selection=name,
-                            decimal_odds=float(price),
-                            lay_odds=None,
+                            decimal_odds=back,
+                            lay_odds=lay,
+                            # The Odds API exposes no stake sizes.
                             back_liquidity=None,
                             lay_liquidity=None,
                             captured_at=now,

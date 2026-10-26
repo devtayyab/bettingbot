@@ -2,9 +2,12 @@
 
 Pipeline for each target-book market:
   1. Align the target market (Stoiximan) to the Betfair reference and Pinnacle.
-  2. De-vig Betfair to get the fair probability per selection (the reference).
+  2. De-vig Betfair to get the fair probability per selection (the reference),
+     using the back/lay midpoint, after hard gates (total matched, depth near
+     the price, relative spread) and a 0..1 Market Quality Score.
   3. Favorite filter: only selections with fair_prob >= FAVORITE_MIN_PROB.
-  4. Edge: edge = fair_prob * target_odds - 1. Require edge >= EDGE_THRESHOLD.
+  4. Edge: edge = fair_prob * target_odds - 1. Require
+     edge >= EDGE_THRESHOLD + uncertainty (spread) + quality penalty + slippage.
   5. Confirmation: de-vig Pinnacle; require its fair prob to agree with Betfair
      within CONFIRMATION_TOLERANCE. A book offering a great price that BOTH sharps
      disagree with is a trap, not value.
@@ -29,6 +32,7 @@ from ..db.repository import _safe_event_id, get_event_exposure
 from ..db.session import session_scope
 from ..logging import get_logger
 from ..sources.base import OddsSource
+from .market_quality import QualityThresholds, assess_market, edge_buffer
 from .matching import match_markets, selection_key
 from .score import (
     BetfairScoreTracker,
@@ -217,28 +221,56 @@ class ValueEngine:
             return []
 
         ref_quotes = reference.quotes
+        # Market Quality Score: total matched + depth near the price + relative spread.
+        quality = assess_market(
+            reference,
+            QualityThresholds(
+                min_total_matched=min_total_matched,
+                strong_total_matched=sport_cfg.get("strong_total_matched", s.strong_total_matched),
+                min_liquidity=min_liquidity,
+                strong_liquidity=sport_cfg.get("strong_liquidity", s.strong_liquidity),
+                good_spread=sport_cfg.get("good_spread", s.good_spread),
+                max_spread=max_spread,
+                depth_band=sport_cfg.get("depth_band", s.depth_band),
+            ),
+        )
         raw_probs = []
-        for q in ref_quotes:
+        for q, sq in zip(ref_quotes, quality.selections):
             if q.lay_odds is not None:
                 # 2. Market Health - Spread & Liquidity per selection
                 # Midpoint relative spread: (Lay - Back) / ((Lay + Back) / 2)
-                spread = odds_math.relative_spread(q.decimal_odds, q.lay_odds)
+                spread = sq.spread if sq.spread is not None else 0.0
                 if spread > max_spread:
                     log.debug("health_rejected", reason="spread_too_high",
                               selection=q.selection, spread=spread, max_spread=max_spread)
                     self._bump("market_spread_too_high")
                     return []
-                
-                if (q.back_liquidity is not None and q.back_liquidity < min_liquidity) or \
-                   (q.lay_liquidity is not None and q.lay_liquidity < min_liquidity):
+
+                # Depth near the price (summed over ladder levels within depth_band;
+                # falls back to best-level size when no ladder is available).
+                if (sq.back_depth is not None and sq.back_depth < min_liquidity) or \
+                   (sq.lay_depth is not None and sq.lay_depth < min_liquidity):
                     log.debug("health_rejected", reason="low_liquidity",
-                              selection=q.selection, min_liquidity=min_liquidity)
+                              selection=q.selection, min_liquidity=min_liquidity,
+                              back_depth=sq.back_depth, lay_depth=sq.lay_depth)
                     self._bump("market_low_liquidity")
                     return []
                     
                 raw_probs.append(odds_math.midpoint_prob(q.decimal_odds, q.lay_odds))
             else:
                 raw_probs.append(odds_math.implied_prob(q.decimal_odds))
+
+        min_quality = sport_cfg.get("min_market_quality", s.min_market_quality)
+        if min_quality > 0 and quality.effective_score < min_quality:
+            log.debug("health_rejected", reason="low_market_quality",
+                      score=quality.score, completeness=round(quality.completeness, 2),
+                      min_quality=min_quality)
+            self._bump("market_low_quality")
+            return []
+
+        half_spread_by_key = {
+            selection_key(sq.selection): sq.half_spread_prob for sq in quality.selections
+        }
 
         ref_fair = odds_math.devig_from_probs(raw_probs, odds_math.DevigMethod.MULTIPLICATIVE)
         ref_fair_by_key = {
@@ -269,6 +301,7 @@ class ValueEngine:
         )
         max_odds = sport_cfg.get("max_odds", s.max_odds)
         min_odds = sport_cfg.get("min_odds", s.min_odds)
+        slippage = s.live_slippage_buffer if is_live else s.slippage_buffer
 
         tally = getattr(self, "_drop_tally", None)
         if tally is None:
@@ -303,13 +336,31 @@ class ValueEngine:
                 drop("below_favorite_min_prob")
                 continue
 
-            # 4. Edge threshold against the target book's offered odds.
+            # 4. Edge threshold against the target book's offered odds, plus an
+            # uncertainty buffer: reference spread, market quality and slippage.
             e = odds_math.edge(fair_prob, tq.decimal_odds)
+            buffer = 0.0
+            if s.enable_edge_buffer:
+                buffer = edge_buffer(
+                    offered_odds=tq.decimal_odds,
+                    half_spread_prob=half_spread_by_key.get(key),
+                    quality=quality,
+                    slippage=slippage,
+                    quality_penalty_max=s.quality_penalty_max,
+                    unknown_spread_prob=s.unknown_spread_prob,
+                )
+            total_required = required_edge + buffer
             
             if best_edge is None or e > best_edge:
                 best_edge = e
             if e < required_edge:
                 drop("edge_below_threshold")
+                continue
+            if e < total_required:
+                log.debug("edge_within_buffer", selection=tq.selection, edge=round(e, 4),
+                          base=required_edge, buffer=round(buffer, 4),
+                          quality=quality.effective_score)
+                drop("edge_within_uncertainty_buffer")
                 continue
 
             # Latency protection (stale odds rejection for both live and prematch)
@@ -398,12 +449,16 @@ class ValueEngine:
                     event_start_time=target.start_time,
                     # Capture all selections' odds for Stoiximan-style 1X2 display
                     all_market_odds={q.selection: q.decimal_odds for q in target.quotes},
+                    market_quality=round(quality.effective_score, 4),
+                    required_edge=round(total_required, 4),
                 )
             )
             log.info(
                 "value_signal",
                 selection=tq.selection,
                 edge=round(e, 4),
+                required_edge=round(total_required, 4),
+                market_quality=round(quality.effective_score, 4),
                 fair_prob=round(fair_prob, 4),
                 target_odds=tq.decimal_odds,
                 stake=stake,
@@ -419,6 +474,7 @@ class ValueEngine:
                 live=is_live,
                 best_edge=round(best_edge, 4) if best_edge is not None else None,
                 required_edge=required_edge,
+                market_quality=round(quality.effective_score, 4),
                 drops=drops,
             )
         return out

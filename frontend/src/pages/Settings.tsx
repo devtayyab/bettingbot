@@ -11,6 +11,17 @@ interface ConfigData {
   min_total_matched: number;
   min_liquidity: number;
   max_spread: number;
+  strong_total_matched: number;
+  strong_liquidity: number;
+  good_spread: number;
+  depth_band: number;
+  betfair_ladder_levels: number;
+  min_market_quality: number;
+  enable_edge_buffer: boolean;
+  slippage_buffer: number;
+  live_slippage_buffer: number;
+  quality_penalty_max: number;
+  unknown_spread_prob: number;
   require_confirmation: boolean;
   enable_pinnacle_confirmation: boolean;
   min_odds: number;
@@ -26,6 +37,7 @@ interface ConfigData {
   placement_require_approval: boolean;
   allow_demo_fallback: boolean;
   placement_bookmaker: string;
+  odds_api_fetch_lay?: boolean;
 }
 
 const FIELD_LABELS: Record<string, { label: string; description: string; type: string; min?: number; max?: number; step?: number }> = {
@@ -38,9 +50,20 @@ const FIELD_LABELS: Record<string, { label: string; description: string; type: s
   max_stake: { label: 'Max Stake per Bet (€)', description: 'Hard cap on any single bet stake regardless of Kelly sizing', type: 'number', min: 0, step: 1 },
   bankroll: { label: 'Bankroll (€)', description: 'Total available capital — used for Kelly stake calculations', type: 'number', min: 0, step: 50 },
   max_event_exposure: { label: 'Max Event Exposure (€)', description: 'Maximum total staked on a single event across all markets', type: 'number', min: 0, step: 5 },
-  min_total_matched: { label: 'Min Total Matched (€)', description: 'Minimum Betfair market liquidity required to consider a signal', type: 'number', min: 0, step: 100 },
-  min_liquidity: { label: 'Min Liquidity (€)', description: 'Minimum available liquidity per selection', type: 'number', min: 0, step: 5 },
-  max_spread: { label: 'Max Back/Lay Spread', description: 'Maximum acceptable spread between back and lay odds', type: 'percent', min: 0, max: 0.5, step: 0.01 },
+  min_total_matched: { label: 'Min Total Matched (€)', description: 'Minimum Betfair traded volume required to trust the market (recommended €10,000+)', type: 'number', min: 0, step: 500 },
+  min_liquidity: { label: 'Min Depth Near Price (€)', description: 'Minimum € available on BOTH back and lay sides near the best price, per selection (recommended €100+)', type: 'number', min: 0, step: 10 },
+  max_spread: { label: 'Max Back/Lay Spread (%)', description: 'Relative spread (Lay−Back) / mid. Reject above ~2%; ≤1% is high quality', type: 'percent', min: 0, max: 0.5, step: 0.005 },
+  strong_total_matched: { label: 'Strong Total Matched (€)', description: 'Volume treated as fully strong in the quality score (e.g. €25,000)', type: 'number', min: 0, step: 1000 },
+  strong_liquidity: { label: 'Strong Depth (€)', description: 'Depth near price treated as fully strong in the quality score (e.g. €500)', type: 'number', min: 0, step: 50 },
+  good_spread: { label: 'Good Spread (%)', description: 'Spread at or below this scores full marks (e.g. 1%)', type: 'percent', min: 0, max: 0.5, step: 0.005 },
+  depth_band: { label: 'Depth Band (%)', description: 'Ladder levels within this distance of the best price count as depth', type: 'percent', min: 0, max: 0.5, step: 0.005 },
+  betfair_ladder_levels: { label: 'Betfair Ladder Levels', description: 'How many price levels to read from the Betfair stream (1–10). Requires restart', type: 'number', min: 1, max: 10, step: 1 },
+  min_market_quality: { label: 'Min Market Quality Score', description: 'Reject reference markets below this score (0–1). 0 = score only feeds the edge buffer', type: 'percent', min: 0, max: 1, step: 0.05 },
+  enable_edge_buffer: { label: 'Enable Edge Buffer', description: 'Require edge > threshold + spread uncertainty + quality penalty + slippage', type: 'boolean' },
+  slippage_buffer: { label: 'Slippage Buffer (pre-match)', description: 'Extra edge reserved for price movement / execution cost', type: 'percent', min: 0, max: 0.2, step: 0.0025 },
+  live_slippage_buffer: { label: 'Slippage Buffer (live)', description: 'Extra edge reserved for live price movement', type: 'percent', min: 0, max: 0.2, step: 0.0025 },
+  quality_penalty_max: { label: 'Max Quality Penalty', description: 'Extra edge required for a zero-quality (thin/unknown) Betfair market', type: 'percent', min: 0, max: 0.2, step: 0.0025 },
+  unknown_spread_prob: { label: 'Unknown Spread Uncertainty', description: 'Probability uncertainty assumed when Betfair lay price is unavailable', type: 'percent', min: 0, max: 0.1, step: 0.0005 },
   confirmation_tolerance: { label: 'Confirmation Tolerance', description: 'How closely Pinnacle probability must match Betfair to confirm a signal', type: 'percent', min: 0, max: 0.5, step: 0.01 },
   poll_interval_live: { label: 'Live Poll Interval (sec)', description: 'How often to scan live markets (seconds)', type: 'number', min: 5, step: 5 },
   poll_interval_prematch: { label: 'Pre-Match Poll Interval (sec)', description: 'How often to scan pre-match markets (seconds)', type: 'number', min: 30, step: 30 },
@@ -48,6 +71,7 @@ const FIELD_LABELS: Record<string, { label: string; description: string; type: s
   placement_require_approval: { label: 'Require Manual Approval', description: 'When enabled, each signal must be manually approved before placement', type: 'boolean' },
   require_confirmation: { label: 'Require Pinnacle Confirmation', description: 'When enabled, a signal requires a matching Pinnacle price', type: 'boolean' },
   allow_demo_fallback: { label: 'Allow Demo Fallback', description: 'When enabled, uses fake demo data if no real signals found. Keep OFF in production!', type: 'boolean' },
+  odds_api_fetch_lay: { label: 'Fetch Lay Odds (The Odds API)', description: 'Request exchange lay prices (h2h_lay) from The Odds API so Betfair has true back/lay spread & midpoint probabilities (uses 1 extra quota credit per sport)', type: 'boolean' },
 };
 
 const GROUPS = [
@@ -61,7 +85,15 @@ const GROUPS = [
   },
   {
     title: '📊 Market Health',
-    fields: ['min_total_matched', 'min_liquidity', 'max_spread'],
+    fields: ['min_total_matched', 'min_liquidity', 'max_spread', 'odds_api_fetch_lay'],
+  },
+  {
+    title: '🏅 Market Quality Score',
+    fields: ['strong_total_matched', 'strong_liquidity', 'good_spread', 'depth_band', 'betfair_ladder_levels', 'min_market_quality'],
+  },
+  {
+    title: '🛡 Edge Buffer',
+    fields: ['enable_edge_buffer', 'slippage_buffer', 'live_slippage_buffer', 'quality_penalty_max', 'unknown_spread_prob'],
   },
   {
     title: '⏱ Scanning Schedule',

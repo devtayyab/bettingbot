@@ -45,6 +45,17 @@ _EVENT_TYPE: dict[Sport, str] = {
 }
 
 
+def _to_ladder(levels: list[dict]) -> tuple[tuple[float, float], ...]:
+    """Convert serialised [{'price', 'size'}, ...] ladder levels to (price, size) tuples."""
+    out: list[tuple[float, float]] = []
+    for lvl in levels or []:
+        try:
+            out.append((float(lvl["price"]), float(lvl["size"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return tuple(out)
+
+
 class BetfairStreamSource:
     name: str = "betfair_stream"
 
@@ -146,8 +157,11 @@ class BetfairStreamSource:
                 event_type_ids=[event_type_id],
                 market_types=["MATCH_ODDS"],
             )
+            # Several ladder levels so depth just behind the best price counts
+            # toward market quality (EX_BEST_OFFERS supports up to 10).
             market_data_filter = filters.streaming_market_data_filter(
-                fields=["EX_BEST_OFFERS", "EX_MARKET_DEF"], ladder_levels=1
+                fields=["EX_BEST_OFFERS", "EX_MARKET_DEF"],
+                ladder_levels=get_settings().betfair_ladder_levels,
             )
 
             log.info("betfair_stream_subscribing", sport=sport.value)
@@ -285,6 +299,8 @@ class BetfairStreamSource:
                         lay_odds=float(best_lay["price"]),
                         back_liquidity=float(best_back["size"]),
                         lay_liquidity=float(best_lay["size"]),
+                        back_ladder=_to_ladder(atb),
+                        lay_ladder=_to_ladder(atl),
                         captured_at=captured_at,
                     )
                 )

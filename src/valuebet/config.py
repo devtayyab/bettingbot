@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # The Odds API
     the_odds_api_key: str = ""
+    odds_api_fetch_lay: bool = True
 
     # Pinnacle
     pinnacle_username: str = ""
@@ -39,6 +40,24 @@ class Settings(BaseSettings):
     min_total_matched: float = Field(default=10000.0, ge=0)
     min_liquidity: float = Field(default=100.0, ge=0)
     max_spread: float = Field(default=0.02, ge=0, le=1)
+    # Market Quality Score (0..1). Volume/depth ramp from the min to the "strong"
+    # level; spread scores 1 at <= good_spread and 0 at >= max_spread.
+    strong_total_matched: float = Field(default=25000.0, ge=0)
+    strong_liquidity: float = Field(default=500.0, ge=0)
+    good_spread: float = Field(default=0.01, ge=0, le=1)
+    # Ladder levels within this relative distance of the best price count as depth.
+    depth_band: float = Field(default=0.02, ge=0, le=0.5)
+    # Betfair stream ladder levels to subscribe to (1..10).
+    betfair_ladder_levels: int = Field(default=3, ge=1, le=10)
+    # Reject reference markets scoring below this (0 = score only feeds the buffer).
+    min_market_quality: float = Field(default=0.0, ge=0, le=1)
+    # Edge buffer: signal only when edge >= threshold + uncertainty + slippage.
+    enable_edge_buffer: bool = True
+    slippage_buffer: float = Field(default=0.005, ge=0, le=1)
+    live_slippage_buffer: float = Field(default=0.01, ge=0, le=1)
+    quality_penalty_max: float = Field(default=0.02, ge=0, le=1)
+    # Probability uncertainty assumed when the reference has no lay price.
+    unknown_spread_prob: float = Field(default=0.0025, ge=0, le=1)
     # When true, a signal requires a matching Pinnacle price; never bet on Betfair alone.
     require_confirmation: bool = False
     enable_pinnacle_confirmation: bool = False
@@ -54,37 +73,32 @@ class Settings(BaseSettings):
     bankroll: float = Field(default=500.0, gt=0)
 
     # Dynamic Sport Overrides (JSON string mapped to dict)
-    sport_overrides: dict[str, dict] = Field(
-        default_factory=lambda: {
-            "soccer": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "tennis": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "basketball": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "american_football": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "baseball": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "ice_hockey": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "cricket": {"edge_threshold": 0.01, "min_total_matched": 10000.0, "max_spread": 0.02, "min_liquidity": 100.0},
-            "rugby_league": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
-            "rugby_union": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
-            "golf": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
-            "mma": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
-            "boxing": {"edge_threshold": 0.015, "min_total_matched": 5000.0, "max_spread": 0.025, "min_liquidity": 50.0},
-            "volleyball": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
-            "handball": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
-            "darts": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
-            "esports": {"edge_threshold": 0.02, "min_total_matched": 2500.0, "max_spread": 0.03, "min_liquidity": 50.0},
-            "table_tennis": {"edge_threshold": 0.02, "min_total_matched": 1000.0, "max_spread": 0.03, "min_liquidity": 25.0},
-        }
-    )
+    # Default is empty so that global settings (configured in UI or .env)
+    # apply to all sports uniformly without being overridden by hardcoded defaults.
+    sport_overrides: dict[str, dict] = Field(default_factory=dict)
 
     def get_sport_config(self, sport: str) -> dict:
         """Returns the specific thresholds for a sport, falling back to globals."""
         overrides = self.sport_overrides.get(sport.lower(), {})
+        min_total_matched = overrides.get("min_total_matched", self.min_total_matched)
+        min_liquidity = overrides.get("min_liquidity", self.min_liquidity)
+        max_spread = overrides.get("max_spread", self.max_spread)
         return {
             "edge_threshold": overrides.get("edge_threshold", self.edge_threshold),
             "live_edge_threshold": overrides.get("live_edge_threshold", self.live_edge_threshold),
-            "min_total_matched": overrides.get("min_total_matched", self.min_total_matched),
-            "max_spread": overrides.get("max_spread", self.max_spread),
-            "min_liquidity": overrides.get("min_liquidity", self.min_liquidity),
+            "min_total_matched": min_total_matched,
+            "max_spread": max_spread,
+            "min_liquidity": min_liquidity,
+            # "Strong" levels can never sit below the pass/fail minimums.
+            "strong_total_matched": max(
+                overrides.get("strong_total_matched", self.strong_total_matched), min_total_matched
+            ),
+            "strong_liquidity": max(
+                overrides.get("strong_liquidity", self.strong_liquidity), min_liquidity
+            ),
+            "good_spread": min(overrides.get("good_spread", self.good_spread), max_spread),
+            "depth_band": overrides.get("depth_band", self.depth_band),
+            "min_market_quality": overrides.get("min_market_quality", self.min_market_quality),
             "max_live_latency_seconds": overrides.get("max_live_latency_seconds", self.max_live_latency_seconds),
             "max_prematch_latency_seconds": overrides.get("max_prematch_latency_seconds", self.max_prematch_latency_seconds),
             "min_odds": overrides.get("min_odds", self.min_odds),
