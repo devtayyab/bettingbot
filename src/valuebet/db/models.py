@@ -94,6 +94,7 @@ class Signal(Base):
 
     id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    event_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     market_type: Mapped[str] = mapped_column(String(64))
     selection: Mapped[str] = mapped_column(String(128))
     sport: Mapped[str] = mapped_column(String(32))
@@ -150,6 +151,8 @@ class Bet(Base):
     # pending / won / lost / void / failed / cancelled
     outcome: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    final_score: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dry_run: Mapped[bool] = mapped_column(default=True)
     placed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

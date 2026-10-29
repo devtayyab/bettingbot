@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export interface SignalData {
   id: number;
   event_id: number;
+  event_name?: string | null;
   selection: string;
   sport: string;
   market_type: string;

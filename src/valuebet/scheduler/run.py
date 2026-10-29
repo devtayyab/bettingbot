@@ -6,13 +6,16 @@ every POLL_INTERVAL_LIVE seconds. Each sport is scanned independently.
 
 from __future__ import annotations
 
+import os
 import signal as os_signal
 import time
+from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from ..config import get_settings
+from ..config import get_settings, sync_dotenv_to_environ
 from ..core.models import Sport
+from ..db.init import ensure_schema_columns
 from ..db.repository import settle_pending_bets, update_clv_for_pending_bets
 from ..db.session import session_scope
 from ..engine.executor import Executor, PlacementRouter
@@ -26,16 +29,23 @@ SPORTS = list(Sport)
 _EXECUTOR: Executor | None = None
 
 
+def _reload_env_if_changed() -> None:
+    """Re-read .env into os.environ (preserving container DB/Redis URLs) so UI/.env edits apply live."""
+    sync_dotenv_to_environ(force=True)
+
+
 def _executor() -> Executor:
     """One Executor for the process: it owns the browser sessions."""
     global _EXECUTOR
     if _EXECUTOR is None:
         _EXECUTOR = Executor()
+    _EXECUTOR.settings = get_settings()
     return _EXECUTOR
 
 
 def _scan_all(live: bool) -> None:
     """Scan every sport, reporting one summary line for the whole cycle."""
+    _reload_env_if_changed()
     label = "live" if live else "prematch"
     started = time.monotonic()
     new_signals = 0
@@ -64,6 +74,7 @@ def _scan_live() -> None:
 
 
 def _execute_bets() -> None:
+    _reload_env_if_changed()
     try:
         placed = _executor().execute_pending()
         if placed > 0:
@@ -83,12 +94,8 @@ def _track_clv() -> None:
 
 
 def _settle_bets() -> None:
-    """Settlement is manual until a real results feed exists.
-
-    `settle_pending_bets` is deliberately a no-op; the only resolver in the tree
-    generates random scores, and running it here wrote invented wins/losses and
-    profit into the bets table. Settle via POST /bets/{id}/settle in the meantime.
-    """
+    """Automatically settle pending bets using official match scores from The Odds API."""
+    _reload_env_if_changed()
     try:
         with session_scope() as session:
             settled = settle_pending_bets(session)
@@ -100,6 +107,7 @@ def _settle_bets() -> None:
 
 def main() -> None:
     configure_logging()
+    ensure_schema_columns()
     s = get_settings()
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
@@ -109,7 +117,6 @@ def main() -> None:
     scheduler.add_job(_settle_bets, "interval", minutes=15, id="settlement")
 
     def _shutdown(*_: object) -> None:
-        # Close the shared Chromium sessions, or they outlive the scheduler.
         try:
             PlacementRouter.shared().close_all()
         except Exception as exc:  # noqa: BLE001
@@ -119,9 +126,6 @@ def main() -> None:
     for sig in (os_signal.SIGINT, os_signal.SIGTERM):
         os_signal.signal(sig, _shutdown)
 
-    # Full effective configuration at boot. The settings that decide whether any
-    # real bet can reach a bookmaker (dry-run, approval, demo fallback, session
-    # cookies) belong in the log at startup, not only in someone's .env.
     from ..placement.session_store import get_cookie_status
 
     cookies = get_cookie_status()
@@ -134,6 +138,8 @@ def main() -> None:
         placement_require_approval=s.placement_require_approval,
         placement_bookmaker=s.placement_bookmaker,
         odds_api_target_bookmaker=s.odds_api_target_bookmaker,
+        odds_api_markets=s.odds_api_markets,
+        re_read_min_edge_delta=s.re_read_min_edge_delta,
         allow_demo_fallback=s.allow_demo_fallback,
         require_confirmation=s.require_confirmation,
         edge_threshold=s.edge_threshold,
@@ -162,7 +168,6 @@ def main() -> None:
             msg="no saved Stoiximan session; placement will fail until you run "
                 "`python -m valuebet.cli login-stoiximan` or import cookies",
         )
-    # Run one immediate pre-match scan so there is data on boot.
     _scan_prematch()
     scheduler.start()
 

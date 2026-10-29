@@ -8,19 +8,23 @@ const SPORTS = [
   'mma', 'boxing', 'volleyball', 'handball', 'darts', 'esports', 'table_tennis',
 ];
 
-const STATUSES = ['detected', 'approved', 'placed', 'rejected', 'paper', 'unconfirmed', 'cancelled'];
+const STATUSES = ['detected', 'approved', 'placed', 'settled', 'rejected', 'paper', 'unconfirmed', 'cancelled'];
 
 const COLUMN_LABELS: Record<string, string> = {
   signal_id: 'Signal ID',
   bet_id: 'Bet ID',
-  selection: 'Bet Selection',
+  event_name: 'Match / Fixture',
+  selection: 'Actual Bet Selection',
   sport: 'Sport',
   bet_type: 'Bet Type',
   market_type: 'Market Type',
   is_live: 'Live / Pre-Match',
+  final_score: 'Match Score',
+  outcome: 'Outcome (Auto)',
+  event_start_time: 'Match Played At',
   target_bookmaker: 'Platform (Stoiximan)',
   target_odds: 'Target Odds (Stoiximan)',
-  betfair_odds: 'Betfair Exchange Odds',
+  betfair_odds: 'Sharp Fair Odds',
   pinnacle_odds: 'Pinnacle Odds',
   edge: 'Edge %',
   fair_prob: 'Fair Probability',
@@ -34,13 +38,13 @@ const COLUMN_LABELS: Record<string, string> = {
   player_profit: 'Player Net Profit / Loss',
   potential_profit: 'Profit If Won',
   potential_loss: 'Loss If Lost',
-  outcome: 'Outcome',
   profit: 'Net Profit / Loss',
   actual_edge: 'Actual Edge %',
   clv: 'Closing Line Value',
   dry_run: 'Paper Bet',
   detected_at: 'Bet Identified At',
   placed_at: 'Bet Placed At',
+  settled_at: 'Result Settled At',
   status: 'Signal Status',
   max_bet: 'Max Bet Available',
   variables_complete: 'All Variables Available',
@@ -79,7 +83,8 @@ export const Reports: React.FC = () => {
   const [reportData, setReportData] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [settlingId, setSettlingId] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API}/accounts`)
@@ -120,26 +125,18 @@ export const Reports: React.FC = () => {
     generateReport();
   }, [selectedAccountId]);
 
-  const handleSettle = async (betId: number, outcome: 'won' | 'lost' | 'void') => {
-    setSettlingId(betId);
+  const handleAutoSyncScores = async () => {
+    setSyncing(true);
+    setSyncNotice(null);
     try {
-      const res = await fetch(`${API}/bets/${betId}/settle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outcome }),
-      });
+      const res = await fetch(`${API}/bets/settle-all`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
-        setReportData((prev) =>
-          prev.map((row) =>
-            row.bet_id === betId
-              ? { ...row, outcome, profit: data.profit }
-              : row
-          )
-        );
+        setSyncNotice(data.message || `Synced ${data.settled ?? 0} finished matches.`);
+        await generateReport();
       }
     } finally {
-      setSettlingId(null);
+      setSyncing(false);
     }
   };
 
@@ -176,14 +173,12 @@ export const Reports: React.FC = () => {
   const selectedAccountObj = accounts.find((a) => String(a.id) === selectedAccountId);
   const columns = reportData.length > 0 ? Object.keys(reportData[0]) : [];
 
-  // Summary KPI Metrics
   const bets = reportData.filter((r) => r.bet_id != null);
   const totalBets = bets.length;
   const wonBets = bets.filter((r) => r.outcome === 'won').length;
   const lostBets = bets.filter((r) => r.outcome === 'lost').length;
   const pendingBets = bets.filter((r) => r.outcome === 'pending').length;
 
-  // Staked and Profit: if a player/user is selected, show player-specific numbers
   const totalProfit = bets.reduce((acc, r) => {
     const val = selectedAccountObj && r.player_profit != null
       ? Number(r.player_profit)
@@ -207,17 +202,32 @@ export const Reports: React.FC = () => {
         <div>
           <h1 className="page-title text-gradient">Reports &amp; Export</h1>
           <p className="page-subtitle">
-            Client &amp; Player level reporting, European decimal odds, and CSV/Excel exports
+            Automatic Won/Lost verification from official match scores, match play times, and CSV/Excel exports
           </p>
         </div>
+        <button className="btn btn-secondary btn-sm" onClick={handleAutoSyncScores} disabled={syncing}>
+          {syncing ? '⏳ Syncing Official Scores…' : '⚡ Auto-Sync Match Results'}
+        </button>
       </div>
+
+      {syncNotice && (
+        <div className="glass-panel" style={{
+          padding: '10px 14px',
+          marginBottom: 'var(--space-4)',
+          background: 'rgba(56, 189, 248, 0.12)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          color: '#7dd3fc',
+          fontSize: '0.85rem',
+        }}>
+          ℹ️ {syncNotice}
+        </div>
+      )}
 
       {/* Filter Panel */}
       <div className="glass-panel" style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-5)' }}>
         <div className="section-title">Filter Options</div>
 
         <div className="report-filters">
-          {/* Client / Player Filter */}
           <div className="form-field" style={{ gridColumn: 'span 2' }}>
             <label style={{ color: 'var(--brand-accent)', fontWeight: 600 }}>
               👤 Client / Player (User Account)
@@ -313,7 +323,6 @@ export const Reports: React.FC = () => {
         </div>
       </div>
 
-      {/* Client Active Notice */}
       {selectedAccountObj && (
         <div
           className="glass-panel"
@@ -354,7 +363,7 @@ export const Reports: React.FC = () => {
           <span className="kpi-label">Total Bets</span>
           <span className="kpi-value">{totalBets}</span>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {wonBets} Won · {lostBets} Lost · {pendingBets} Open
+            {wonBets} Won · {lostBets} Lost · {pendingBets} Awaiting Official Score
           </span>
         </div>
 
@@ -363,7 +372,7 @@ export const Reports: React.FC = () => {
           <span className="kpi-value" style={{ color: Number(winRate.replace(',', '.')) >= 50 ? 'var(--status-success)' : 'var(--text-primary)' }}>
             {winRate}%
           </span>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Settled selections</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Auto-settled selections</span>
         </div>
 
         <div className="glass-panel kpi-card">
@@ -395,17 +404,16 @@ export const Reports: React.FC = () => {
         </div>
       ) : (
         <div className="glass-panel" style={{ padding: 'var(--space-5)' }}>
-          <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Preview ({reportData.length} rows) — European Style Odds &amp; Comparisons</span>
+          <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <span>Preview ({reportData.length} rows) — Match Fixture, Actual Bet, Official Score &amp; Auto Outcome</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Values formatted in European comma decimal (e.g. 2,25)
+              Won/Lost updates automatically once official match scores finalize
             </span>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ minWidth: '130px' }}>Settle Bet</th>
                   {columns.map((col) => (
                     <th key={col} title={col}>
                       {COLUMN_LABELS[col] ?? col}
@@ -416,48 +424,71 @@ export const Reports: React.FC = () => {
               <tbody>
                 {reportData.slice(0, 100).map((row, i) => (
                   <tr key={i}>
-                    <td>
-                      {row.bet_id && row.outcome === 'pending' ? (
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button
-                            className="btn btn-sm"
-                            style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)', padding: '2px 6px', fontSize: '0.75rem', borderRadius: '4px' }}
-                            disabled={settlingId === row.bet_id}
-                            title="Mark Won"
-                            onClick={() => handleSettle(row.bet_id as number, 'won')}
-                          >
-                            ✓ Won
-                          </button>
-                          <button
-                            className="btn btn-sm"
-                            style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '2px 6px', fontSize: '0.75rem', borderRadius: '4px' }}
-                            disabled={settlingId === row.bet_id}
-                            title="Mark Lost"
-                            onClick={() => handleSettle(row.bet_id as number, 'lost')}
-                          >
-                            ✗ Lost
-                          </button>
-                        </div>
-                      ) : row.outcome === 'won' ? (
-                        <span className="pill" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontSize: '0.7rem' }}>WON</span>
-                      ) : row.outcome === 'lost' ? (
-                        <span className="pill" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', fontSize: '0.7rem' }}>LOST</span>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{String(row.outcome || '—')}</span>
-                      )}
-                    </td>
                     {columns.map((col) => {
                       const val = row[col];
                       let display = val == null ? '—' : String(val);
                       let cls = '';
 
-                      // Format European odds
+                      if (col === 'outcome') {
+                        if (display === 'won') {
+                          return (
+                            <td key={col}>
+                              <span className="pill" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontSize: '0.72rem', fontWeight: 700 }}>
+                                ✓ WON
+                              </span>
+                            </td>
+                          );
+                        }
+                        if (display === 'lost') {
+                          return (
+                            <td key={col}>
+                              <span className="pill" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', fontSize: '0.72rem', fontWeight: 700 }}>
+                                ✗ LOST
+                              </span>
+                            </td>
+                          );
+                        }
+                        if (display === 'pending') {
+                          return (
+                            <td key={col}>
+                              <span className="pill" style={{ background: 'rgba(245, 158, 11, 0.14)', color: '#fbbf24', fontSize: '0.7rem' }}>
+                                ⏳ Auto-Pending
+                              </span>
+                            </td>
+                          );
+                        }
+                        return <td key={col} style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{display}</td>;
+                      }
+
+                      if (col === 'final_score') {
+                        return (
+                          <td key={col} style={{ fontFamily: 'monospace', fontWeight: 700, color: display !== '—' ? '#fff' : 'var(--text-muted)' }}>
+                            {display}
+                          </td>
+                        );
+                      }
+
+                      if (col === 'event_name') {
+                        return (
+                          <td key={col} style={{ fontWeight: 600, minWidth: '170px' }}>
+                            {display}
+                          </td>
+                        );
+                      }
+
+                      if (col === 'selection') {
+                        return (
+                          <td key={col} style={{ fontWeight: 700, color: '#38bdf8' }}>
+                            {display}
+                          </td>
+                        );
+                      }
+
                       if (col === 'target_odds' || col === 'placed_odds' || col === 'betfair_odds' || col === 'pinnacle_odds') {
                         display = formatEuropeanOdds(val);
                       }
 
-                      // Format Currency
-                      if (col === 'recommended_stake' || col === 'stake' || col === 'allocated_stake' || col === 'max_bet') {
+                      if (col === 'recommended_stake' || col === 'requested_stake' || col === 'stake' || col === 'allocated_stake' || col === 'max_bet') {
                         if (val != null && !isNaN(Number(val))) {
                           display = formatEuropeanCurrency(val);
                         }
@@ -516,7 +547,7 @@ export const Reports: React.FC = () => {
             </table>
             {reportData.length > 100 && (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-4)', fontSize: '0.875rem' }}>
-                Showing first 100 of {reportData.length} rows — export to see all
+                Showing first 100 of {reportData.length} rows — export CSV/Excel to see all
               </div>
             )}
           </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFeed, type SignalData } from '../hooks/useFeed';
 import { EditBetModal } from '../components/EditBetModal';
 
@@ -10,7 +10,6 @@ const SPORTS = [
   'mma', 'boxing', 'volleyball', 'handball', 'darts', 'esports', 'table_tennis',
 ];
 
-// European style decimal formatting (uses comma separator: 2,25)
 function formatEuropeanOdds(odds: number | null | undefined): string {
   if (odds == null || isNaN(odds) || odds <= 0) return '—';
   return odds.toFixed(2).replace('.', ',');
@@ -46,27 +45,26 @@ function formatDateTime(iso: string | null) {
 function getBetTypeBadge(betType?: string | null, marketType?: string, selection?: string) {
   const t = (betType || marketType || selection || '').toLowerCase();
   if (t.includes('penalty') || t.includes('penalties')) {
-    return { label: 'Penalties', icon: '🎯', color: '#f43f5e', bg: 'rgba(244,63,94,0.14)', border: 'rgba(244,63,94,0.3)' };
+    return { label: betType || 'Penalties', icon: '🎯', color: '#f43f5e', bg: 'rgba(244,63,94,0.14)', border: 'rgba(244,63,94,0.3)' };
   }
   if (t.includes('card') || t.includes('booking') || t.includes('red') || t.includes('yellow')) {
-    return { label: 'Cards / Bookings', icon: '🟨', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.3)' };
+    return { label: betType || 'Cards / Bookings', icon: '🟨', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.3)' };
   }
   if (t.includes('corner')) {
-    return { label: 'Corners', icon: '⛳', color: '#06b6d4', bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.3)' };
+    return { label: betType || 'Corners', icon: '⛳', color: '#06b6d4', bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.3)' };
   }
   if (t.includes('over') || t.includes('under') || t.includes('total')) {
-    return { label: 'Totals (Over/Under)', icon: '📈', color: '#a855f7', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.3)' };
+    return { label: betType || 'Totals (Over/Under)', icon: '📈', color: '#a855f7', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.3)' };
   }
-  if (t.includes('handicap') || t.includes('asian')) {
-    return { label: 'Handicap', icon: '⚖️', color: '#fb923c', bg: 'rgba(251,146,60,0.14)', border: 'rgba(251,146,60,0.3)' };
+  if (t.includes('handicap') || t.includes('asian') || t.includes('spread')) {
+    return { label: betType || 'Handicap', icon: '⚖️', color: '#fb923c', bg: 'rgba(251,146,60,0.14)', border: 'rgba(251,146,60,0.3)' };
   }
   if (t.includes('btts') || t.includes('both')) {
-    return { label: 'Both Teams To Score', icon: '🤝', color: '#10b981', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.3)' };
+    return { label: betType || 'Both Teams To Score', icon: '🤝', color: '#10b981', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.3)' };
   }
   return { label: betType || 'Match Winner (1X2)', icon: '⚽', color: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.3)' };
 }
 
-// Render Stoiximan-style 1/X/2 odds boxes for a market
 interface OddsBoxesProps {
   allMarketOdds: Record<string, number> | null | undefined;
   homeOdds: number | null | undefined;
@@ -76,7 +74,7 @@ interface OddsBoxesProps {
   marketType: string;
 }
 
-function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelection, marketType: _marketType }: OddsBoxesProps) {
+function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelection, marketType }: OddsBoxesProps) {
   type OddsEntry = { label: string; odds: number; isSelected: boolean; key: string; boxLabel: string };
   let entries: OddsEntry[] = [];
 
@@ -84,6 +82,10 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
     const l = label.trim().toLowerCase();
     return l === 'draw' || l === 'tie' || l === 'x' || l === 'empate' || l === 'isopalia';
   };
+
+  const mtLower = (marketType || '').toLowerCase();
+  const isTotals = mtLower.startsWith('totals') || mtLower.includes('over_under');
+  const isHandicap = mtLower.startsWith('handicap') || mtLower.includes('spread');
 
   if (allMarketOdds && Object.keys(allMarketOdds).length > 0) {
     const raw = Object.entries(allMarketOdds).map(([sel, odds]) => ({
@@ -93,13 +95,21 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
       isSelected: sel.toLowerCase() === selectedSelection.toLowerCase(),
     }));
 
-    if (raw.length === 3) {
-      // Find the draw entry
+    if (isTotals) {
+      entries = raw.map((e) => ({
+        ...e,
+        boxLabel: e.label.toLowerCase().startsWith('over') ? 'OVER' : e.label.toLowerCase().startsWith('under') ? 'UNDER' : e.label,
+      }));
+    } else if (isHandicap) {
+      entries = raw.map((e, idx) => ({
+        ...e,
+        boxLabel: idx === 0 ? 'HOME HCAP' : 'AWAY HCAP',
+      }));
+    } else if (raw.length === 3) {
       const drawIdx = raw.findIndex((e) => isDraw(e.label));
       if (drawIdx !== -1) {
         const drawEntry = { ...raw[drawIdx], boxLabel: 'X' };
         const teamEntries = raw.filter((_, idx) => idx !== drawIdx);
-        // Box 1 = Home Team ('1'), Box 2 = Draw ('X'), Box 3 = Away Team ('2')
         entries = [
           { ...teamEntries[0], boxLabel: '1' },
           drawEntry,
@@ -123,12 +133,7 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
   if (entries.length === 0) return null;
 
   return (
-    <div style={{
-      display: 'flex',
-      gap: '6px',
-      margin: '8px 0',
-      flexWrap: 'wrap',
-    }}>
+    <div style={{ display: 'flex', gap: '6px', margin: '8px 0', flexWrap: 'wrap' }}>
       {entries.map((entry) => {
         const selected = entry.isSelected;
         return (
@@ -143,18 +148,13 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
               flex: '1',
               padding: '5px 8px',
               borderRadius: '6px',
-              border: selected
-                ? '1.5px solid #38bdf8'
-                : '1px solid rgba(255,255,255,0.1)',
-              background: selected
-                ? 'rgba(56,189,248,0.18)'
-                : 'rgba(255,255,255,0.04)',
+              border: selected ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+              background: selected ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.04)',
               boxShadow: selected ? '0 0 8px rgba(56,189,248,0.35)' : 'none',
               cursor: 'default',
               transition: 'all 0.15s ease',
             }}
           >
-            {/* Position label (1 / X / 2) */}
             <span style={{
               fontSize: '0.62rem',
               color: selected ? '#38bdf8' : 'var(--text-muted)',
@@ -165,7 +165,6 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
             }}>
               {entry.boxLabel}
             </span>
-            {/* Decimal odds */}
             <span style={{
               fontSize: '0.97rem',
               fontWeight: 700,
@@ -174,12 +173,11 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
             }}>
               {entry.odds.toFixed(2).replace('.', ',')}
             </span>
-            {/* Team or Draw name */}
             <span style={{
               fontSize: '0.58rem',
-              color: selected ? 'rgba(56,189,248,0.8)' : 'var(--text-muted)',
+              color: selected ? 'rgba(56,189,248,0.85)' : 'var(--text-muted)',
               marginTop: '1px',
-              maxWidth: '72px',
+              maxWidth: '110px',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -210,9 +208,24 @@ export const LiveFeed: React.FC = () => {
   const [localSignals, setLocalSignals] = useState<Map<number, Partial<SignalData>>>(new Map());
   const [sportFilter, setSportFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
+  const [betTypeFilter, setBetTypeFilter] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [scanning, setScanning] = useState(false);
+  const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
   const { toasts, toast } = useToast();
+
+  useEffect(() => {
+    fetch(`${API}/odds-api/status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && (data.quota_exhausted || data.valid === false)) {
+          setQuotaWarning(data.message || 'The Odds API key has 0 requests remaining or is invalid.');
+        } else {
+          setQuotaWarning(null);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleTriggerScan = async () => {
     if (scanning) return;
@@ -226,9 +239,9 @@ export const LiveFeed: React.FC = () => {
         const data = await res.json();
         const count = data.new_signals ?? 0;
         if (count > 0) {
-          toast(`Scan complete: ${count} new signal${count !== 1 ? 's' : ''} found!`, 'success');
+          toast(`Scan complete: ${count} signal${count !== 1 ? 's' : ''} found/updated!`, 'success');
         } else {
-          toast('Scan complete: No new value signals found in current markets.', 'info');
+          toast('Scan complete: No new value changes (≥1.5%) found right now.', 'info');
         }
       } else {
         const err = await res.json().catch(() => ({}));
@@ -251,12 +264,18 @@ export const LiveFeed: React.FC = () => {
       if (sportFilter && s.sport !== sportFilter) return false;
       if (marketFilter === 'live' && !s.is_live) return false;
       if (marketFilter === 'prematch' && s.is_live) return false;
+      if (betTypeFilter) {
+        const mt = (s.market_type || '').toLowerCase();
+        if (betTypeFilter === 'h2h' && !mt.includes('match') && !mt.includes('h2h') && !mt.includes('1x2')) return false;
+        if (betTypeFilter === 'totals' && !mt.startsWith('totals') && !mt.includes('over')) return false;
+        if (betTypeFilter === 'spreads' && !mt.startsWith('handicap') && !mt.includes('spread')) return false;
+      }
       return true;
     })
     .sort((a, b) => {
       const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
       const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
-      return timeB - timeA; // newest found first
+      return timeB - timeA;
     });
 
   const toggleExpand = (id: number) => {
@@ -268,13 +287,8 @@ export const LiveFeed: React.FC = () => {
     });
   };
 
-  const expandAll = () => {
-    setExpandedIds(new Set(filtered.map((s) => s.id)));
-  };
-
-  const collapseAll = () => {
-    setExpandedIds(new Set());
-  };
+  const expandAll = () => setExpandedIds(new Set(filtered.map((s) => s.id)));
+  const collapseAll = () => setExpandedIds(new Set());
 
   const doAction = async (id: number, action: string) => {
     try {
@@ -323,7 +337,6 @@ export const LiveFeed: React.FC = () => {
 
   return (
     <div className="feed-page">
-      {/* Toast notifications */}
       <div className="toast-container">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
@@ -335,7 +348,7 @@ export const LiveFeed: React.FC = () => {
         <div>
           <h1 className="page-title text-gradient">Live Betting Feed</h1>
           <p className="page-subtitle">
-            Real-time value signals — European style odds &amp; multi-bookmaker benchmark comparison
+            Real-time value signals across Match Winner, Over/Under &amp; Handicap — re-reads bets only on ≥1,5% value change
           </p>
         </div>
         <div className="feed-status">
@@ -348,17 +361,42 @@ export const LiveFeed: React.FC = () => {
         </div>
       </div>
 
+      {/* Quota Warning Banner */}
+      {quotaWarning && (
+        <div className="glass-panel" style={{
+          padding: '12px 16px',
+          marginBottom: 'var(--space-4)',
+          background: 'rgba(239, 68, 68, 0.14)',
+          border: '1px solid rgba(239, 68, 68, 0.4)',
+          color: '#fca5a5',
+          fontSize: '0.875rem',
+        }}>
+          <strong style={{ color: '#f87171' }}>⚠️ Odds API Feed Alert:</strong> {quotaWarning} Open <strong>Settings → The Odds API Key</strong> to paste an active key.
+        </div>
+      )}
+
       {/* Toolbar / Filters */}
       <div className="feed-toolbar glass-panel">
         <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
           <select
             value={marketFilter}
             onChange={(e) => setMarketFilter(e.target.value)}
-            style={{ minWidth: '150px' }}
+            style={{ minWidth: '145px' }}
           >
-            <option value="">All Markets</option>
+            <option value="">All Timings</option>
             <option value="live">🔴 Live Only</option>
             <option value="prematch">🔵 Pre-Match Only</option>
+          </select>
+
+          <select
+            value={betTypeFilter}
+            onChange={(e) => setBetTypeFilter(e.target.value)}
+            style={{ minWidth: '165px' }}
+          >
+            <option value="">All Bet Markets</option>
+            <option value="h2h">⚽ Match Winner (1X2)</option>
+            <option value="totals">📈 Over / Under Totals</option>
+            <option value="spreads">⚖️ Handicap / Spreads</option>
           </select>
 
           <select
@@ -402,7 +440,7 @@ export const LiveFeed: React.FC = () => {
           </span>
           <span>= Pre-match</span>
           <span style={{ marginLeft: '12px', color: 'var(--text-secondary)' }}>
-            💡 Tip: Click any bet card to reveal recommended stake, profit/loss risk and action controls.
+            💡 Each card shows the full Match Fixture, Actual Bet Selection, Kickoff/Played Time, and Sharp Odds Comparison.
           </span>
         </div>
       </div>
@@ -412,7 +450,7 @@ export const LiveFeed: React.FC = () => {
         <div className="glass-panel empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-8)' }}>
           <div>
             {connected
-              ? '⚡ Watching for value signals… New bets will appear here automatically.'
+              ? '⚡ Watching for real value signals… Qualifying bets appear here automatically.'
               : '📡 Connecting to live feed…'}
           </div>
           <button
@@ -435,7 +473,6 @@ export const LiveFeed: React.FC = () => {
             const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
             const betTypeInfo = getBetTypeBadge(s.bet_type, s.market_type, s.selection);
 
-            // Compute Betfair and Pinnacle odds
             const bfOddsVal = s.betfair_odds ?? (s.fair_prob > 0 ? 1.0 / s.fair_prob : null);
             const pinOddsVal = s.pinnacle_odds ?? (s.confirm_prob && s.confirm_prob > 0 ? 1.0 / s.confirm_prob : null);
 
@@ -452,7 +489,6 @@ export const LiveFeed: React.FC = () => {
                       ? <span className="pill pill-live">LIVE</span>
                       : <span className="pill pill-prematch">PRE-MATCH</span>
                     }
-                    {/* Bet Type Badge */}
                     <span
                       className="pill"
                       style={{
@@ -487,17 +523,41 @@ export const LiveFeed: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Actual Bet Selection */}
-                <div className="bet-card__selection" style={{ fontSize: '1.15rem' }}>
-                  {s.selection}
+                {/* Match Fixture Title */}
+                {s.event_name && (
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                    🏟 {s.event_name}
+                  </div>
+                )}
+
+                {/* Actual Bet Pick */}
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  marginBottom: '6px',
+                }}>
+                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    Actual Bet:
+                  </span>
+                  <span style={{ fontSize: '0.98rem', fontWeight: 700, color: '#38bdf8' }}>
+                    {s.selection}
+                  </span>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    @ {formatEuropeanOdds(s.target_odds)}
+                  </span>
                 </div>
 
                 <div className="bet-card__meta" style={{ marginBottom: '8px' }}>
                   <span className="bet-card__sport">{s.sport.replace('_', ' ')}</span>
-                  <span className="bet-card__market">{s.market_type}</span>
+                  <span className="bet-card__market">{betTypeInfo.label}</span>
                 </div>
 
-                {/* Stoiximan-style 1/X/2 odds boxes */}
+                {/* Market Odds Boxes */}
                 <OddsBoxes
                   allMarketOdds={s.all_market_odds}
                   homeOdds={s.home_odds}
@@ -513,8 +573,8 @@ export const LiveFeed: React.FC = () => {
                     <span>🎯 Stoiximan:</span>
                     <span style={{ fontSize: '0.95rem' }}>{formatEuropeanOdds(s.target_odds)}</span>
                   </div>
-                  <div className="bm-badge bm-badge--ref" title="Betfair Exchange Fair Odds">
-                    <span>Betfair:</span>
+                  <div className="bm-badge bm-badge--ref" title="Sharp Fair Reference Odds">
+                    <span>Sharp Fair:</span>
                     <strong>{formatEuropeanOdds(bfOddsVal)}</strong>
                   </div>
                   <div className="bm-badge bm-badge--ref" title="Pinnacle Sharp Bookmaker Odds">
@@ -525,28 +585,25 @@ export const LiveFeed: React.FC = () => {
 
                 {/* Timestamps */}
                 <div className="bet-card__timestamps" style={{ margin: '6px 0 0 0', padding: '6px 0 0 0', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-                  <span title="Date and time when the bet was found">
-                    🔍 Found: {formatDateTime(s.detected_at)}
-                  </span>
                   {s.event_start_time && (
-                    <span title="Date and time when the event will occur">
-                      ⏱ Event: {formatDateTime(s.event_start_time)}
+                    <span title="Date and time when the match is played">
+                      ⚽ Match Time: <strong>{formatDateTime(s.event_start_time)}</strong>
                     </span>
                   )}
+                  <span title="Date and time when this value bet was detected">
+                    🔍 Found: {formatDateTime(s.detected_at)}
+                  </span>
                 </div>
 
-                {/* Click to expand/collapse prompt */}
                 <div className="expand-toggle-indicator">
                   <span>{isExpanded ? '▲ Click to hide details' : '▼ Click to view stake, risk & actions'}</span>
                 </div>
 
-                {/* Expandable Details Drawer */}
                 {isExpanded && (
                   <div
                     className="bet-card__details-drawer"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* Key Stats Grid */}
                     <div className="bet-card__stats">
                       <div className="stat-item">
                         <span className="stat-label">Recommended Stake</span>
@@ -578,7 +635,6 @@ export const LiveFeed: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Risk / Reward Breakdown */}
                     <div style={{
                       background: 'rgba(255, 255, 255, 0.03)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -626,7 +682,6 @@ export const LiveFeed: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Quality Badges */}
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
                       {!s.variables_complete && (
                         <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
@@ -648,7 +703,6 @@ export const LiveFeed: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="bet-card__footer">
                       {s.status === 'detected' && (
                         <>
