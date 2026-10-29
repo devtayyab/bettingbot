@@ -24,6 +24,7 @@ COPY migrations ./migrations
 COPY src ./src
 COPY frontend ./frontend
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY --from=frontend-builder /app/frontend/dist /opt/frontend-dist
 RUN pip install --no-cache-dir -e ".[dev]"
 
 # Install Playwright browser and OS dependencies into the image

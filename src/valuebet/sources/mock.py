@@ -22,6 +22,8 @@ class MockSource:
         now = datetime.now(UTC)
         snapshots: list[MarketSnapshot] = []
         for i, (market_id, quotes) in enumerate(self._odds_table.items()):
+            teams = [sel for sel, _ in quotes if sel.strip().lower() not in ("draw", "tie", "x")]
+            ev_name = f"{teams[0]} vs {teams[1]}" if len(teams) >= 2 else None
             snapshots.append(
                 MarketSnapshot(
                     event_id=f"evt-{i}",
@@ -31,13 +33,14 @@ class MockSource:
                     status=MarketStatus.LIVE if live else MarketStatus.PREMATCH,
                     start_time=now + timedelta(hours=2),
                     total_matched=10000.0,
+                    event_name=ev_name,
                     quotes=[
                         Quote(
                             source=self.name,
                             selection=sel,
                             decimal_odds=odds,
                             captured_at=now,
-                            back_liquidity=5000.0
+                            back_liquidity=5000.0,
                         )
                         for sel, odds in quotes
                     ],

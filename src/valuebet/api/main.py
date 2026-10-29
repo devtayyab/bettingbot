@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -16,34 +18,39 @@ from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import get_settings
+from ..config import get_settings, reset_settings_cache, sync_dotenv_to_environ, write_dotenv_updates
 from ..core.models import Sport
-from ..db.models import Account, AccountNote, Bet, Signal
+from ..db.init import ensure_schema_columns
+from ..db.models import Bet, Signal
 from ..db.repository import (
     add_account_note,
     all_bookmaker_limit_summaries,
     bookmaker_limit_summary,
     cancel_signal,
+    classify_bet_type,
     create_account,
     delete_account_note,
     export_csv,
     export_xlsx,
+    extract_final_score,
+    extract_settled_at_iso,
     generate_report,
     get_account,
     get_account_activity,
+    infer_event_name,
     list_account_notes,
     list_accounts,
     open_signals,
     pnl_summary,
+    purge_demo_data,
     record_bet,
     save_limit_event,
+    settle_pending_bets,
     update_account,
     update_signal,
 )
 from ..db.session import get_engine, session_scope
 from ..logging import configure_logging, get_logger
-from contextlib import asynccontextmanager
-
 from ..pipeline import run_scan
 from ..placement.base import PlacementRequest
 from .dashboard import DASHBOARD_HTML
@@ -54,35 +61,42 @@ log = get_logger("api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from ..scheduler.run import _scan_prematch, _scan_live, _execute_bets, _track_clv, _settle_bets
-    import threading
-
+    ensure_schema_columns()
     s = get_settings()
-    scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
-    scheduler.add_job(_scan_live, "interval", seconds=s.poll_interval_live, id="live")
-    scheduler.add_job(_execute_bets, "interval", seconds=30, id="executor")
-    scheduler.add_job(_track_clv, "interval", minutes=5, id="clv_tracker")
-    scheduler.add_job(_settle_bets, "interval", minutes=15, id="settlement")
-    scheduler.start()
-    log.info(
-        "background_scheduler_started",
-        prematch_interval=s.poll_interval_prematch,
-        live_interval=s.poll_interval_live,
-    )
+    scheduler = None
+    if s.enable_embedded_scheduler:
+        import threading
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from ..scheduler.run import _execute_bets, _scan_live, _scan_prematch, _settle_bets, _track_clv
 
-    # Run initial scan 2s after startup in a background thread
-    timer = threading.Timer(2.0, _scan_prematch)
-    timer.daemon = True
-    timer.start()
+        scheduler = BackgroundScheduler(timezone="UTC")
+        scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
+        scheduler.add_job(_scan_live, "interval", seconds=s.poll_interval_live, id="live")
+        scheduler.add_job(_execute_bets, "interval", seconds=30, id="executor")
+        scheduler.add_job(_track_clv, "interval", minutes=5, id="clv_tracker")
+        scheduler.add_job(_settle_bets, "interval", minutes=15, id="settlement")
+        scheduler.start()
+        app.state.scheduler = scheduler
+        log.info(
+            "background_scheduler_started",
+            prematch_interval=s.poll_interval_prematch,
+            live_interval=s.poll_interval_live,
+        )
+
+        timer = threading.Timer(2.0, _scan_prematch)
+        timer.daemon = True
+        timer.start()
+    else:
+        app.state.scheduler = None
+        log.info("embedded_scheduler_disabled", msg="dedicated scheduler process handles polling")
 
     yield
 
-    try:
-        scheduler.shutdown(wait=False)
-    except Exception:
-        pass
+    if scheduler is not None:
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
     try:
         from ..engine.executor import PlacementRouter
         PlacementRouter.shared().close_all()
@@ -99,6 +113,7 @@ async def rewrite_api_prefix(request, call_next):
         request.scope["path"] = request.scope["path"][4:]
     return await call_next(request)
 
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -107,6 +122,7 @@ async def rewrite_api_prefix(request, call_next):
 class SignalOut(BaseModel):
     id: int
     event_id: int
+    event_name: str | None = None
     selection: str
     sport: str
     market_type: str
@@ -125,16 +141,13 @@ class SignalOut(BaseModel):
     pinnacle_odds: float | None = None
     target_bookmaker: str = "stoiximan"
     bet_type: str | None = None
-    # Stoiximan-style 3-box odds display
     home_odds: float | None = None
     draw_odds: float | None = None
     away_odds: float | None = None
-    # Full market odds as {selection: decimal_odds} for any market type
     all_market_odds: dict[str, float] | None = None
 
 
 class PlaceIn(BaseModel):
-    # Reject if live odds drop more than this fraction below detected odds.
     slippage: float = 0.02
 
 
@@ -148,6 +161,7 @@ class SignalUpdateIn(BaseModel):
 
 class SettleIn(BaseModel):
     outcome: str  # won | lost | void
+    final_score: str | None = None
 
 
 class AccountIn(BaseModel):
@@ -170,7 +184,7 @@ class AccountNoteIn(BaseModel):
 
 
 class ReportParams(BaseModel):
-    date_from: str | None = None   # ISO date string
+    date_from: str | None = None
     date_to: str | None = None
     sport: str | None = None
     status: str | None = None
@@ -182,6 +196,9 @@ class ReportParams(BaseModel):
 class ConfigUpdateIn(BaseModel):
     edge_threshold: float | None = None
     live_edge_threshold: float | None = None
+    re_read_min_edge_delta: float | None = None
+    favorite_min_prob: float | None = None
+    odds_api_markets: str | None = None
     kelly_fraction: float | None = None
     max_stake: float | None = None
     bankroll: float | None = None
@@ -191,6 +208,7 @@ class ConfigUpdateIn(BaseModel):
     require_confirmation: bool | None = None
     enable_pinnacle_confirmation: bool | None = None
     require_score_sync: bool | None = None
+    confirmation_tolerance: float | None = None
     min_odds: float | None = None
     max_odds: float | None = None
     min_total_matched: float | None = None
@@ -223,41 +241,19 @@ class OddsApiKeyIn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _classify_bet_type(market_type: str | None, selection: str | None) -> str:
-    mt = (market_type or "").lower()
-    sel = (selection or "").lower()
-    if "penalty" in mt or "penalties" in mt or "penalty" in sel:
-        return "Penalties"
-    if "card" in mt or "booking" in mt or "card" in sel:
-        return "Cards"
-    if "corner" in mt or "corner" in sel:
-        return "Corners"
-    if "over" in mt or "under" in mt or "total" in mt:
-        return "Over/Under"
-    if "handicap" in mt or "asian" in mt:
-        return "Handicap"
-    if "btts" in mt or "both teams" in mt:
-        return "Both Teams to Score"
-    if any(k in mt for k in ("h2h", "1x2", "winner", "moneyline", "match")):
-        return "Match Winner (1X2)"
-    return market_type.replace("_", " ").title() if market_type else "Match Winner"
-
-
 def _to_out(s: Signal) -> SignalOut:
     bf_odds = round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None
     pin_odds = round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None
-    btype = _classify_bet_type(s.market_type, s.selection)
+    btype = classify_bet_type(s.market_type, s.selection)
+    ev_name = infer_event_name(s)
 
-    # Parse all_market_odds from JSON blob stored in DB
     all_market_odds: dict[str, float] | None = None
     try:
         if s.all_market_odds_json:
-            import json as _json
-            all_market_odds = _json.loads(s.all_market_odds_json)
+            all_market_odds = json.loads(s.all_market_odds_json)
     except Exception:
         pass
 
-    # Ensure Home=1, Draw=X, Away=2 ordering even for legacy signals
     h_odds = s.home_odds
     d_odds = s.draw_odds
     a_odds = s.away_odds
@@ -271,7 +267,6 @@ def _to_out(s: Signal) -> SignalOut:
             item for item in all_market_odds.items() if item[0].strip().lower() not in ("draw", "tie", "x")
         ]
         if draw_item and len(team_items) >= 2:
-            # Reorder dict so keys are strictly [Home, Draw, Away]
             all_market_odds = {
                 team_items[0][0]: team_items[0][1],
                 draw_item[0]: draw_item[1],
@@ -284,6 +279,7 @@ def _to_out(s: Signal) -> SignalOut:
     return SignalOut(
         id=s.id,
         event_id=s.event_id,
+        event_name=ev_name,
         selection=s.selection,
         sport=s.sport,
         market_type=s.market_type,
@@ -310,7 +306,6 @@ def _to_out(s: Signal) -> SignalOut:
 
 
 def _db_backend() -> str:
-    """Report the database actually in use, so a dev SQLite fallback is visible."""
     try:
         return get_engine().url.get_backend_name()
     except Exception as exc:  # noqa: BLE001
@@ -322,7 +317,6 @@ def _parse_dt(s: str | None) -> datetime | None:
         return None
     try:
         dt = datetime.fromisoformat(s)
-        # Only add tzinfo if the parsed datetime is naive (no timezone info)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
@@ -342,7 +336,6 @@ def favicon():
 
 @app.on_event("shutdown")
 def _close_placers() -> None:
-    """Close the shared browser sessions so uvicorn reloads don't leak Chromium."""
     try:
         from ..engine.executor import PlacementRouter
         PlacementRouter.shared().close_all()
@@ -380,10 +373,12 @@ def health() -> dict:
 @app.get("/config")
 def get_config() -> dict:
     """Return all editable configuration variables."""
+    sync_dotenv_to_environ(force=True)
     s = get_settings()
     return {
         "edge_threshold": s.edge_threshold,
         "live_edge_threshold": s.live_edge_threshold,
+        "re_read_min_edge_delta": s.re_read_min_edge_delta,
         "confirmation_tolerance": s.confirmation_tolerance,
         "max_live_latency_seconds": s.max_live_latency_seconds,
         "max_prematch_latency_seconds": s.max_prematch_latency_seconds,
@@ -419,6 +414,7 @@ def get_config() -> dict:
         "placement_bookmaker": s.placement_bookmaker,
         "sport_overrides": s.sport_overrides,
         "odds_api_fetch_lay": s.odds_api_fetch_lay,
+        "odds_api_markets": s.odds_api_markets,
     }
 
 
@@ -432,6 +428,7 @@ def upload_cookies(cookies: list[dict[str, Any]]) -> dict:
     except Exception as exc:
         raise HTTPException(400, detail=str(exc))
 
+
 @app.delete("/cookies")
 def clear_cookies_legacy() -> dict:
     """Delete saved cookies (legacy endpoint)."""
@@ -443,12 +440,14 @@ def clear_cookies_legacy() -> dict:
 @app.get("/odds-api/status")
 async def get_odds_api_status() -> dict:
     """Check the current Odds API key status, remaining quota, and validity."""
+    sync_dotenv_to_environ(force=True)
     s = get_settings()
-    key = os.environ.get("THE_ODDS_API_KEY") or s.the_odds_api_key or ""
+    key = (s.the_odds_api_key or "").strip().strip('"').strip("'")
     if not key:
         return {
             "configured": False,
             "valid": False,
+            "quota_exhausted": False,
             "masked_key": "",
             "message": "No Odds API key configured",
             "requests_remaining": None,
@@ -462,19 +461,34 @@ async def get_odds_api_status() -> dict:
             resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={key}")
             rem = resp.headers.get("x-requests-remaining")
             used = resp.headers.get("x-requests-used")
+            rem_int = int(rem) if rem and rem.isdigit() else None
+            used_int = int(used) if used and used.isdigit() else used
+
             if resp.status_code == 200:
+                if rem_int is not None and rem_int <= 0:
+                    return {
+                        "configured": True,
+                        "valid": False,
+                        "quota_exhausted": True,
+                        "masked_key": masked,
+                        "message": "Quota Exhausted (0 requests remaining) — Update key or upgrade plan to scan real games",
+                        "requests_remaining": 0,
+                        "requests_used": used_int,
+                    }
                 return {
                     "configured": True,
                     "valid": True,
+                    "quota_exhausted": False,
                     "masked_key": masked,
                     "message": "API Key is Active & LIVE",
-                    "requests_remaining": int(rem) if rem and rem.isdigit() else rem,
-                    "requests_used": int(used) if used and used.isdigit() else used,
+                    "requests_remaining": rem_int if rem_int is not None else rem,
+                    "requests_used": used_int,
                 }
             elif resp.status_code == 401:
                 return {
                     "configured": True,
                     "valid": False,
+                    "quota_exhausted": False,
                     "masked_key": masked,
                     "message": "Invalid or Expired API key (Unauthorized 401)",
                     "requests_remaining": 0,
@@ -484,15 +498,17 @@ async def get_odds_api_status() -> dict:
                 return {
                     "configured": True,
                     "valid": False,
+                    "quota_exhausted": False,
                     "masked_key": masked,
                     "message": f"API returned status {resp.status_code}",
-                    "requests_remaining": rem,
-                    "requests_used": used,
+                    "requests_remaining": rem_int if rem_int is not None else rem,
+                    "requests_used": used_int,
                 }
     except Exception as exc:
         return {
             "configured": True,
             "valid": False,
+            "quota_exhausted": False,
             "masked_key": masked,
             "message": f"Network check failed: {exc}",
             "requests_remaining": None,
@@ -503,12 +519,14 @@ async def get_odds_api_status() -> dict:
 @app.post("/odds-api/update")
 async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
     """Validate and update the Odds API key, saving it to .env and runtime environment."""
-    new_key = body.api_key.strip()
+    raw_key = body.api_key.strip()
+    if "=" in raw_key and raw_key.upper().startswith("THE_ODDS_API_KEY"):
+        raw_key = raw_key.split("=", 1)[1].strip()
+    new_key = raw_key.strip('"').strip("'").strip()
     if not new_key:
         raise HTTPException(400, "API key cannot be empty")
 
     import httpx
-    # 1. Test key validity first with live call
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={new_key}")
@@ -517,89 +535,96 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
             if resp.status_code != 200:
                 detail = "Invalid or expired key (Unauthorized 401)" if resp.status_code == 401 else f"Status {resp.status_code}"
                 raise HTTPException(400, f"API key test failed: {detail}")
+            if rem and rem.isdigit() and int(rem) <= 0:
+                raise HTTPException(400, "This API key has 0 requests remaining (quota exhausted). Please enter a key with available quota.")
     except httpx.HTTPError as exc:
         raise HTTPException(400, f"Failed to connect to The Odds API: {exc}")
 
-    # 2. Save to .env
-    env_path = Path(".env")
-    if env_path.exists():
-        lines = env_path.read_text().splitlines()
-        found = False
-        new_lines = []
-        for line in lines:
-            if line.strip().startswith("THE_ODDS_API_KEY="):
-                new_lines.append(f"THE_ODDS_API_KEY={new_key}")
-                found = True
-            else:
-                new_lines.append(line)
-        if not found:
-            new_lines.append(f"THE_ODDS_API_KEY={new_key}")
-        env_path.write_text("\n".join(new_lines) + "\n")
+    env_path = write_dotenv_updates({"THE_ODDS_API_KEY": new_key})
 
-    # 3. Update runtime process env
-    os.environ["THE_ODDS_API_KEY"] = new_key
-    # Invalidate settings cache so next get_settings() re-reads the updated key
-    from ..config import reset_settings_cache
-    reset_settings_cache()
-    log.info("odds_api_key_updated", remaining=rem)
+    # Clear any quota-exhausted circuit breakers and cached active-sport lists immediately
+    from ..core import results as _results_mod
+    from ..sources import the_odds_api as _odds_mod
+    _odds_mod._QUOTA_EXHAUSTED_UNTIL = None
+    _odds_mod._ACTIVE_KEYS_CACHE.clear()
+    _results_mod._SCORES_QUOTA_EXHAUSTED_UNTIL = None
+
+    # Trigger an immediate background pre-match Soccer scan so live matches appear right away
+    import threading
+
+    def _immediate_soccer_scan() -> None:
+        try:
+            run_scan(Sport.SOCCER, live=False)
+        except Exception as scan_exc:
+            log.warning("immediate_scan_after_key_update_failed", error=str(scan_exc))
+
+    threading.Thread(target=_immediate_soccer_scan, daemon=True).start()
+
+    log.info("odds_api_key_updated", remaining=rem, env_file=str(env_path))
 
     masked = (new_key[:6] + "..." + new_key[-4:]) if len(new_key) > 10 else "***"
     return {
         "success": True,
+        "configured": True,
         "valid": True,
+        "quota_exhausted": False,
         "masked_key": masked,
         "message": f"API key is valid and now LIVE! ({rem} requests remaining)",
         "requests_remaining": int(rem) if rem and rem.isdigit() else rem,
         "requests_used": int(used) if used and used.isdigit() else used,
     }
 
+
 @app.patch("/config")
 def patch_config(body: ConfigUpdateIn) -> dict:
-    """Update editable config variables (writes to .env file)."""
-    env_path = Path(".env")
-    if not env_path.exists():
-        raise HTTPException(404, ".env file not found — create it first")
-
-    lines = env_path.read_text().splitlines()
+    """Update editable config variables (writes to .env file and updates runtime)."""
     updates: dict[str, Any] = {
         k: v for k, v in body.model_dump().items() if v is not None
     }
-    import json as _json
-    env_map = {}
+    env_map: dict[str, str] = {}
     for k, v in updates.items():
         if isinstance(v, bool):
             env_map[k.upper()] = str(v).lower()
         elif isinstance(v, (dict, list)):
-            env_map[k.upper()] = _json.dumps(v)
+            env_map[k.upper()] = json.dumps(v)
         else:
             env_map[k.upper()] = str(v)
 
-    new_lines = []
-    updated_keys = set()
-    for line in lines:
-        stripped = line.strip()
-        if "=" in stripped and not stripped.startswith("#"):
-            key = stripped.split("=", 1)[0].strip()
-            if key in env_map:
-                new_lines.append(f"{key}={env_map[key]}")
-                updated_keys.add(key)
-                continue
-        new_lines.append(line)
+    if env_map:
+        write_dotenv_updates(env_map)
 
-    # Append any keys that weren't already in .env
-    for key, val in env_map.items():
-        if key not in updated_keys:
-            new_lines.append(f"{key}={val}")
+    # Dynamically reschedule embedded APScheduler jobs if running
+    sched = getattr(app.state, "scheduler", None)
+    if sched is not None:
+        s = get_settings()
+        if "poll_interval_prematch" in updates:
+            try:
+                sched.reschedule_job("prematch", trigger="interval", seconds=s.poll_interval_prematch)
+            except Exception:
+                pass
+        if "poll_interval_live" in updates:
+            try:
+                sched.reschedule_job("live", trigger="interval", seconds=s.poll_interval_live)
+            except Exception:
+                pass
 
-    env_path.write_text("\n".join(new_lines) + "\n")
-    # Also apply to running process environment immediately
-    for key, val in env_map.items():
-        os.environ[key] = val
-    # Invalidate settings cache so next get_settings() re-reads the updated env
-    from ..config import reset_settings_cache
-    reset_settings_cache()
     log.info("config_updated", updates=list(updates.keys()))
-    return {"updated": list(updates.keys()), "message": "Config saved and applied"}
+    return {"updated": list(updates.keys()), "message": "Config saved and applied immediately"}
+
+
+@app.delete("/demo-data")
+def delete_demo_data() -> dict:
+    """Purge fabricated mock/demo signals and bets (Team A, etc.) from the database."""
+    with session_scope() as session:
+        counts = purge_demo_data(session)
+    return {
+        "success": True,
+        **counts,
+        "message": (
+            f"Removed {counts['signals_deleted']} demo signals and "
+            f"{counts['bets_deleted']} demo bets."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -650,24 +675,21 @@ def list_signals(status: str | None = None) -> list[SignalOut]:
 
 @app.get("/signals/feed")
 async def signals_feed() -> StreamingResponse:
-    """Server-Sent Events endpoint — pushes new signals in real time.
-
-    Clients connect once and receive a continuous stream. Each event is a JSON
-    payload of the latest signal list. The stream never ends; failed bets are
-    filtered out on the client side (status=failed/cancelled).
-    """
+    """Server-Sent Events endpoint — pushes new & updated signals in real time."""
     async def _generator() -> AsyncIterator[str]:
-        last_ids: set[int] = set()
+        last_fingerprint: set[tuple] | None = None
         while True:
             try:
                 with session_scope() as session:
                     sigs = open_signals(session)
-                    current_ids = {s.id for s in sigs}
-                    # Send on first connect (last_ids empty) OR when signal list changes
-                    if current_ids != last_ids:
+                    fingerprint = {
+                        (s.id, round(s.edge, 4), round(s.target_odds, 3), s.status, round(s.recommended_stake, 2))
+                        for s in sigs
+                    }
+                    if last_fingerprint is None or fingerprint != last_fingerprint:
                         payload = json.dumps([_to_out(s).model_dump() for s in sigs])
                         yield f"data: {payload}\n\n"
-                        last_ids = current_ids
+                        last_fingerprint = fingerprint
             except Exception as exc:
                 log.warning("sse_error", error=str(exc))
                 yield f"event: error\ndata: {str(exc)}\n\n"
@@ -857,7 +879,7 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Bets (settlement)
+# Bets (settlement & results)
 # ---------------------------------------------------------------------------
 
 
@@ -877,35 +899,51 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
             bet.profit = -bet.stake
         else:
             bet.profit = 0.0
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat()
+        bet.settled_at = now_dt
+        if body.final_score:
+            bet.final_score = body.final_score
         clean_note = bet.note or ""
         if "settled_at:" in clean_note:
-            import re
             clean_note = re.sub(r"settled_at:\S+\s*", "", clean_note).strip()
-        bet.note = f"settled_at:{now_iso} {clean_note}".strip()
+        bet.note = f"settled_at:{now_iso} {clean_note}".strip()[:510]
         log.info("bet_settled", bet_id=bet_id, selection=bet.selection,
                  previous_outcome=previous, outcome=body.outcome,
                  stake=bet.stake, placed_odds=bet.placed_odds,
                  profit=bet.profit, dry_run=bet.dry_run)
-        return {"bet_id": bet_id, "outcome": body.outcome, "profit": bet.profit, "settled_at": now_iso}
+        return {
+            "bet_id": bet_id,
+            "outcome": body.outcome,
+            "profit": bet.profit,
+            "final_score": bet.final_score,
+            "settled_at": now_iso,
+        }
 
 
 @app.post("/bets/settle-all")
 def trigger_settle_all() -> dict:
-    """Trigger auto-settlement of pending bets using The Odds API match scores."""
-    from ..db.repository import settle_pending_bets
+    """Trigger automatic settlement of pending bets against official The Odds API match scores."""
     with session_scope() as session:
-        settled = settle_pending_bets(session)
-    return {"settled": settled, "message": f"Successfully settled {settled} bets"}
+        settled = settle_pending_bets(session, force_check_all=True)
+    return {
+        "settled": settled,
+        "message": (
+            f"Automatically settled {settled} completed match(es) from official scores."
+            if settled > 0
+            else "Checked official scores — no newly completed matches ready to settle yet."
+        ),
+    }
 
 
 @app.get("/results")
 def get_results(
     outcome: str | None = None,
     sport: str | None = None,
+    include_pending: bool = False,
     limit: int = 200,
 ) -> list[dict]:
-    """Return settled bets (Won and Lost) with signal generated time and settlement end time."""
+    """Return bets with full match name, actual bet, match played time, official score, and settlement time."""
     with session_scope() as session:
         from sqlalchemy import select
         stmt = (
@@ -915,8 +953,8 @@ def get_results(
         )
         if outcome and outcome != "all":
             stmt = stmt.where(Bet.outcome == outcome)
-        else:
-            stmt = stmt.where(Bet.outcome.in_(["won", "lost"]))
+        elif not include_pending:
+            stmt = stmt.where(Bet.outcome.in_(["won", "lost", "void"]))
         if sport and sport != "all":
             stmt = stmt.where(Signal.sport == sport)
         stmt = stmt.limit(limit)
@@ -924,12 +962,9 @@ def get_results(
         rows = session.execute(stmt).all()
         results = []
         for bet, sig in rows:
-            settled_time_str = None
-            if bet.note and "settled_at:" in bet.note:
-                try:
-                    settled_time_str = bet.note.split("settled_at:")[1].split()[0]
-                except Exception:
-                    pass
+            settled_time_str = extract_settled_at_iso(bet)
+            score_str = extract_final_score(bet)
+            ev_name = infer_event_name(sig)
 
             profit_val = bet.profit if bet.profit is not None else 0.0
             if bet.outcome == "won":
@@ -941,11 +976,12 @@ def get_results(
 
             bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
             pin_odds = round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None
-            btype = _classify_bet_type(sig.market_type, bet.selection)
+            btype = classify_bet_type(sig.market_type, bet.selection)
 
             results.append({
                 "bet_id": bet.id,
                 "signal_id": sig.id,
+                "event_name": ev_name,
                 "selection": bet.selection,
                 "sport": sig.sport,
                 "market_type": sig.market_type,
@@ -954,6 +990,7 @@ def get_results(
                 "placed_odds": bet.placed_odds,
                 "stake": bet.stake,
                 "outcome": bet.outcome,
+                "final_score": score_str,
                 "profit": profit_val,
                 "profit_pct": profit_pct,
                 "edge": sig.edge,
@@ -961,9 +998,10 @@ def get_results(
                 "betfair_odds": bf_odds,
                 "pinnacle_odds": pin_odds,
                 "accuracy": round(sig.fair_prob * 100, 1),
+                "event_start_time": sig.event_start_time.isoformat() if sig.event_start_time else None,
                 "signal_generated_at": sig.detected_at.isoformat() if sig.detected_at else None,
                 "bet_placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
-                "end_time": settled_time_str or (bet.placed_at.isoformat() if bet.placed_at else None),
+                "end_time": settled_time_str,
                 "bookmaker": bet.book or "stoiximan",
                 "dry_run": bet.dry_run,
             })
@@ -983,12 +1021,10 @@ def pnl() -> dict:
 
 @app.get("/accounts")
 def get_accounts() -> list[dict]:
-    """List all customer accounts."""
     with session_scope() as session:
         accounts = list_accounts(session)
         result = []
         for acc in accounts:
-            # Compute quick stats for this account
             activity = get_account_activity(session, acc.id)
             result.append({
                 "id": acc.id,
@@ -1007,7 +1043,6 @@ def get_accounts() -> list[dict]:
 
 @app.post("/accounts")
 def create_account_endpoint(body: AccountIn) -> dict:
-    """Create a new customer account."""
     with session_scope() as session:
         acc = create_account(
             session,
@@ -1028,7 +1063,6 @@ def create_account_endpoint(body: AccountIn) -> dict:
 
 @app.get("/accounts/{account_id}")
 def get_account_detail(account_id: int) -> dict:
-    """Full account detail including bets and activity."""
     with session_scope() as session:
         acc = get_account(session, account_id)
         if not acc:
@@ -1038,7 +1072,6 @@ def get_account_detail(account_id: int) -> dict:
 
 @app.patch("/accounts/{account_id}")
 def update_account_endpoint(account_id: int, body: AccountUpdateIn) -> dict:
-    """Update a customer account (including pause/unpause)."""
     with session_scope() as session:
         acc = update_account(
             session,
@@ -1104,7 +1137,6 @@ def account_activity(account_id: int) -> dict:
 
 @app.post("/reports/generate")
 def reports_generate(body: ReportParams) -> list[dict]:
-    """Generate a report with optional date/sport/status filters and player/user filter."""
     with session_scope() as session:
         return generate_report(
             session,
@@ -1129,7 +1161,6 @@ def reports_export(
     include_dry_run: bool = True,
     account_id: int | None = None,
 ) -> Response:
-    """Export report as CSV or Excel with human-friendly column names."""
     kwargs = dict(
         date_from=_parse_dt(date_from),
         date_to=_parse_dt(date_to),
@@ -1159,20 +1190,18 @@ def reports_export(
 
 
 # ---------------------------------------------------------------------------
-# Feature 4: Bookmaker Limit / Account Health endpoints
+# Bookmaker Limit / Account Health endpoints
 # ---------------------------------------------------------------------------
 
 
 @app.get("/limits")
 def get_all_limits() -> list[dict]:
-    """Return stake-acceptance summary for all bookmakers."""
     with session_scope() as session:
         return all_bookmaker_limit_summaries(session)
 
 
 @app.get("/limits/{bookmaker}")
 def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
-    """Return stake-acceptance summary for one bookmaker."""
     with session_scope() as session:
         return bookmaker_limit_summary(session, bookmaker, last_n)
 
@@ -1233,7 +1262,6 @@ def clear_cookies() -> dict:
 
 @app.get("/debug/screenshot")
 def debug_screenshot():
-    from fastapi.responses import FileResponse
     for p in [Path("data/navigate_failed.png"), Path("data/stoiximan_blocked.png")]:
         if p.exists():
             return FileResponse(p, media_type="image/png")
@@ -1244,8 +1272,15 @@ def debug_screenshot():
 # Frontend static files & Root dashboard
 # ---------------------------------------------------------------------------
 
-_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
-if not _FRONTEND_DIST.exists():
+# Prefer /opt/frontend-dist built inside the Docker image so a host `.:/app`
+# volume mount cannot shadow the newly built React assets with an outdated copy.
+_DOCKER_FRONTEND_DIST = Path("/opt/frontend-dist")
+_LOCAL_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+if (_DOCKER_FRONTEND_DIST / "index.html").exists():
+    _FRONTEND_DIST = _DOCKER_FRONTEND_DIST
+elif (_LOCAL_FRONTEND_DIST / "index.html").exists():
+    _FRONTEND_DIST = _LOCAL_FRONTEND_DIST
+else:
     _FRONTEND_DIST = Path("frontend/dist")
 
 if (_FRONTEND_DIST / "assets").is_dir():

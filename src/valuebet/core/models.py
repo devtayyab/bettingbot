@@ -95,6 +95,7 @@ class MarketSnapshot:
     is_suspended: bool = False
     # Feature 5: Settlement rule — must match exactly between reference and target.
     settlement_rule: SettlementRule = SettlementRule.UNKNOWN
+    event_name: str | None = None
 
     def selections(self) -> list[str]:
         return [q.selection for q in self.quotes]
@@ -141,3 +142,4 @@ class ValueSignal:
     # and the total edge that was required (base threshold + uncertainty buffer).
     market_quality: float | None = None
     required_edge: float | None = None
+    event_name: str | None = None

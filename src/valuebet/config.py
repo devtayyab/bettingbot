@@ -2,8 +2,123 @@
 
 from __future__ import annotations
 
+import os
+import re
+from functools import lru_cache
+from pathlib import Path
+
+from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Container-orchestration variables set explicitly in docker-compose `environment:`
+# must not be overwritten by localhost/SQLite defaults sitting in a host `.env` file.
+_PROTECTED_INFRA_KEYS = frozenset({
+    "DATABASE_URL",
+    "REDIS_URL",
+    "ENABLE_EMBEDDED_SCHEDULER",
+})
+
+_ENV_LINE_KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+_LAST_DOTENV_MTIME_NS: int | None = None
+_LAST_DOTENV_PATH: Path | None = None
+
+
+def resolve_env_path(explicit_path: Path | None = None) -> Path:
+    """Locate the active `.env` file reliably regardless of working directory."""
+    if explicit_path is not None:
+        return explicit_path
+    cwd_env = Path(".env")
+    if cwd_env.exists():
+        return cwd_env.resolve()
+    repo_env = Path(__file__).resolve().parents[2] / ".env"
+    if repo_env.exists():
+        return repo_env
+    return cwd_env.resolve()
+
+
+def _clean_env_value(val: str) -> str:
+    cleaned = val.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ("'", '"'):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+def sync_dotenv_to_environ(force: bool = False, env_path: Path | None = None) -> Path:
+    """Sync `.env` values into `os.environ` with override=True when `.env` changes.
+
+    Fixes the Docker Compose `env_file` + `uvicorn --reload` trap where Docker
+    locks initial `.env` values into the parent process `os.environ`, causing
+    `pydantic-settings` and `os.environ.get(...)` to ignore subsequent `.env` edits
+    and revert updated API keys back to the old key on worker reload/restart.
+    """
+    global _LAST_DOTENV_MTIME_NS, _LAST_DOTENV_PATH
+    path = resolve_env_path(env_path)
+    if not path.exists():
+        return path
+
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return path
+
+    if not force and _LAST_DOTENV_PATH == path and _LAST_DOTENV_MTIME_NS == mtime_ns:
+        return path
+
+    parsed = dotenv_values(path)
+    for key, raw_val in parsed.items():
+        if not key or raw_val is None:
+            continue
+        if key in _PROTECTED_INFRA_KEYS and key in os.environ:
+            continue
+        os.environ[key] = _clean_env_value(raw_val)
+
+    _LAST_DOTENV_PATH = path
+    _LAST_DOTENV_MTIME_NS = mtime_ns
+    _build_settings.cache_clear()
+    return path
+
+
+def write_dotenv_updates(updates: dict[str, str], env_path: Path | None = None) -> Path:
+    """Atomically update keys in `.env`, deduplicate repeated lines, and sync `os.environ`."""
+    global _LAST_DOTENV_MTIME_NS, _LAST_DOTENV_PATH
+    path = resolve_env_path(env_path)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    cleaned_updates = {k.strip(): _clean_env_value(str(v)) for k, v in updates.items()}
+    seen_updated: set[str] = set()
+    new_lines: list[str] = []
+
+    for line in lines:
+        m = _ENV_LINE_KEY_RE.match(line)
+        if m:
+            key = m.group(1)
+            if key in cleaned_updates:
+                if key not in seen_updated:
+                    new_lines.append(f"{key}={cleaned_updates[key]}")
+                    seen_updated.add(key)
+                # Drop any duplicate definitions of the same key later in the file
+                continue
+        new_lines.append(line)
+
+    for key, val in cleaned_updates.items():
+        if key not in seen_updated:
+            new_lines.append(f"{key}={val}")
+
+    path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    for key, val in cleaned_updates.items():
+        if key in _PROTECTED_INFRA_KEYS and key in os.environ:
+            continue
+        os.environ[key] = val
+
+    try:
+        _LAST_DOTENV_PATH = path
+        _LAST_DOTENV_MTIME_NS = path.stat().st_mtime_ns
+    except OSError:
+        pass
+    _build_settings.cache_clear()
+    return path
 
 
 class Settings(BaseSettings):
@@ -14,6 +129,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     log_level: str = "INFO"
     env: str = "dev"
+    # When running alongside a dedicated `scheduler` container (docker-compose),
+    # set to False on the `api` container so scans/settlements don't run twice.
+    enable_embedded_scheduler: bool = True
 
     # Betfair
     betfair_app_key: str = ""
@@ -25,14 +143,20 @@ class Settings(BaseSettings):
     # The Odds API
     the_odds_api_key: str = ""
     odds_api_fetch_lay: bool = True
+    # Comma-separated market keys to fetch from The Odds API: h2h (Match Winner),
+    # totals (Over/Under), spreads (Handicap).
+    odds_api_markets: str = "h2h,totals,spreads"
 
     # Pinnacle
     pinnacle_username: str = ""
     pinnacle_password: str = ""
 
     # Value engine
-    edge_threshold: float = Field(default=0.01, ge=0, le=1)
-    live_edge_threshold: float = Field(default=0.03, ge=0, le=1)
+    edge_threshold: float = Field(default=0.02, ge=0, le=1)
+    live_edge_threshold: float = Field(default=0.035, ge=0, le=1)
+    # Re-read / update the same bet (event + market + selection) ONLY if its value
+    # (edge) changes by at least this fraction (0.015 = 1.5 percentage points).
+    re_read_min_edge_delta: float = Field(default=0.015, ge=0, le=1)
     confirmation_tolerance: float = Field(default=0.15, ge=0, le=1)
     max_live_latency_seconds: float = Field(default=60.0, gt=0)
     max_prematch_latency_seconds: float = Field(default=300.0, gt=0)
@@ -66,7 +190,7 @@ class Settings(BaseSettings):
     require_score_sync: bool = False
     min_odds: float = Field(default=1.01, ge=1.0)
     max_odds: float = Field(default=6.0, gt=1.0)
-    favorite_min_prob: float = Field(default=0.10, ge=0, le=1)
+    favorite_min_prob: float = Field(default=0.15, ge=0, le=1)
     kelly_fraction: float = Field(default=0.25, ge=0, le=1)
     max_stake: float = Field(default=10.0, gt=0)
     max_event_exposure: float = Field(default=25.0, gt=0)
@@ -107,9 +231,8 @@ class Settings(BaseSettings):
 
     # Cadence
     poll_interval_live: int = 300
-    poll_interval_prematch: int = 1800
+    poll_interval_prematch: int = 900
 
-    # Placement (single account)
     # Notifications
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -125,9 +248,7 @@ class Settings(BaseSettings):
     placement_require_approval: bool = True
 
     # When true, a scan that finds no real value falls back to the deterministic
-    # mock sources. Those produce fake events ("Team A", "Real Madrid" at invented
-    # odds) that exist at no bookmaker, so a signal from them can never be placed.
-    # Useful for demoing the UI; must stay false in any real deployment.
+    # mock sources. Must stay false in any real deployment.
     allow_demo_fallback: bool = False
 
     # When true, an unreachable DATABASE_URL is a hard error instead of silently
@@ -135,29 +256,24 @@ class Settings(BaseSettings):
     strict_database: bool = True
 
     # The Odds API bookmaker key whose prices we treat as the target book's.
-    # This MUST be the book we actually place on. It defaulted to "betano_uk"
-    # while placement hits stoiximan.com.cy: sister brands, but separate markets
-    # with different prices, so the price a signal was detected at does not exist
-    # on the site the bot then tries to bet it on.
     odds_api_target_bookmaker: str = "betano_uk"
-    # The book placement is routed to. Must correspond to the key above.
+    # The book placement is routed to.
     placement_bookmaker: str = "stoiximan"
 
 
-from functools import lru_cache
-
-
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Return the cached Settings instance.
-
-    Settings is expensive to construct (reads .env + validates all fields).
-    The cache is invalidated by ``reset_settings_cache()`` when config is
-    patched at runtime via PATCH /config so the next call re-reads env vars.
-    """
+def _build_settings() -> Settings:
     return Settings()
 
 
-def reset_settings_cache() -> None:
+def get_settings() -> Settings:
+    """Return the Settings instance, auto-reloading `.env` whenever modified on disk."""
+    sync_dotenv_to_environ(force=False)
+    return _build_settings()
+
+
+def reset_settings_cache(reload_dotenv: bool = False) -> None:
     """Invalidate the settings cache so the next ``get_settings()`` re-parses env."""
-    get_settings.cache_clear()
+    if reload_dotenv:
+        sync_dotenv_to_environ(force=True)
+    _build_settings.cache_clear()

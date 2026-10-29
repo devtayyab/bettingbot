@@ -148,6 +148,11 @@ class ValueEngine:
             unmatched_sample: list[dict] = []
             for tgt in target_markets:
                 ref = match_markets(tgt, ref_markets)
+                if ref is None and not (self.settings.enable_pinnacle_confirmation and self.settings.require_confirmation):
+                    # Secondary markets (e.g. Totals, Handicap) may only be priced by Pinnacle in the feed.
+                    pin_as_ref = match_markets(tgt, conf_markets)
+                    if pin_as_ref is not None:
+                        ref = pin_as_ref
                 if ref is None:
                     unmatched_ref += 1
                     if len(unmatched_sample) < 3:
@@ -156,7 +161,7 @@ class ValueEngine:
                             "target": sorted(selection_key(s) for s in tgt.selections()),
                         })
                     continue
-                conf = match_markets(tgt, conf_markets)
+                conf = None if ref in conf_markets else match_markets(tgt, conf_markets)
                 if conf is None:
                     unmatched_conf += 1
                 evaluated += 1
@@ -451,6 +456,7 @@ class ValueEngine:
                     all_market_odds={q.selection: q.decimal_odds for q in target.quotes},
                     market_quality=round(quality.effective_score, 4),
                     required_edge=round(total_required, 4),
+                    event_name=target.event_name or reference.event_name,
                 )
             )
             log.info(
