@@ -436,6 +436,8 @@ class ValueEngine:
                 drop("zero_stake")
                 continue
 
+            ref_q = reference.quote_for(tq.selection)
+            conf_q = confirmation.quote_for(tq.selection) if confirmation else None
             out.append(
                 ValueSignal(
                     event_id=target.event_id,
@@ -457,6 +459,8 @@ class ValueEngine:
                     market_quality=round(quality.effective_score, 4),
                     required_edge=round(total_required, 4),
                     event_name=target.event_name or reference.event_name,
+                    betfair_odds=ref_q.decimal_odds if ref_q else None,
+                    pinnacle_odds=conf_q.decimal_odds if conf_q else None,
                 )
             )
             log.info(

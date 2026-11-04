@@ -43,6 +43,13 @@ def _executor() -> Executor:
     return _EXECUTOR
 
 
+def _active_sports(s) -> list[Sport]:
+    raw = (getattr(s, "active_sports", None) or "soccer").strip()
+    configured = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    matched = [sp for sp in Sport if sp.value.lower() in configured or sp.name.lower() in configured]
+    return matched or [Sport.SOCCER]
+
+
 def _scan_all(live: bool) -> None:
     """Scan every sport, reporting one summary line for the whole cycle."""
     _reload_env_if_changed()
@@ -50,7 +57,9 @@ def _scan_all(live: bool) -> None:
     started = time.monotonic()
     new_signals = 0
     failed: list[str] = []
-    for sport in SPORTS:
+    s = get_settings()
+    sports_to_scan = _active_sports(s)
+    for sport in sports_to_scan:
         try:
             new_signals += run_scan(sport, live=live)
         except Exception as exc:  # noqa: BLE001
@@ -58,7 +67,7 @@ def _scan_all(live: bool) -> None:
             log.error(f"{label}_scan_failed", sport=sport.value, error=str(exc))
     log.info(
         f"{label}_scan_cycle_complete",
-        sports=len(SPORTS),
+        sports=len(sports_to_scan),
         new_signals=new_signals,
         failed_sports=failed,
         elapsed_seconds=round(time.monotonic() - started, 1),

@@ -574,7 +574,7 @@ export const LiveFeed: React.FC = () => {
                     <span style={{ fontSize: '0.95rem' }}>{formatEuropeanOdds(s.target_odds)}</span>
                   </div>
                   <div className="bm-badge bm-badge--ref" title="Sharp Fair Reference Odds">
-                    <span>Sharp Fair:</span>
+                    <span>Betfair:</span>
                     <strong>{formatEuropeanOdds(bfOddsVal)}</strong>
                   </div>
                   <div className="bm-badge bm-badge--ref" title="Pinnacle Sharp Bookmaker Odds">

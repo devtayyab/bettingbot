@@ -119,6 +119,8 @@ class Signal(Base):
     home_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     draw_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     away_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    betfair_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pinnacle_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     # All selections' odds serialised as JSON (e.g. {"Iceland": 1.29, "Draw": 5.40, "Estonia": 11.50})
     all_market_odds_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 

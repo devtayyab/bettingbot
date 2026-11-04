@@ -199,6 +199,7 @@ class ConfigUpdateIn(BaseModel):
     re_read_min_edge_delta: float | None = None
     favorite_min_prob: float | None = None
     odds_api_markets: str | None = None
+    active_sports: str | None = None
     kelly_fraction: float | None = None
     max_stake: float | None = None
     bankroll: float | None = None
@@ -242,8 +243,8 @@ class OddsApiKeyIn(BaseModel):
 
 
 def _to_out(s: Signal) -> SignalOut:
-    bf_odds = round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None
-    pin_odds = round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None
+    bf_odds = s.betfair_odds if getattr(s, "betfair_odds", None) is not None else (round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None)
+    pin_odds = s.pinnacle_odds if getattr(s, "pinnacle_odds", None) is not None else (round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None)
     btype = classify_bet_type(s.market_type, s.selection)
     ev_name = infer_event_name(s)
 
@@ -415,6 +416,7 @@ def get_config() -> dict:
         "sport_overrides": s.sport_overrides,
         "odds_api_fetch_lay": s.odds_api_fetch_lay,
         "odds_api_markets": s.odds_api_markets,
+        "active_sports": getattr(s, "active_sports", "soccer"),
     }
 
 

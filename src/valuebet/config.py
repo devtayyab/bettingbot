@@ -146,6 +146,9 @@ class Settings(BaseSettings):
     # Comma-separated market keys to fetch from The Odds API: h2h (Match Winner),
     # totals (Over/Under), spreads (Handicap).
     odds_api_markets: str = "h2h,totals,spreads"
+    # Comma-separated list of active sports to scan (e.g. 'soccer' or 'soccer,tennis').
+    # Prevents scanning all 17 sports on every cycle and wasting API quota credits.
+    active_sports: str = "soccer"
 
     # Pinnacle
     pinnacle_username: str = ""

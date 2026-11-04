@@ -143,3 +143,6 @@ class ValueSignal:
     market_quality: float | None = None
     required_edge: float | None = None
     event_name: str | None = None
+    # Raw bookmaker odds as observed in the sharp markets
+    betfair_odds: float | None = None
+    pinnacle_odds: float | None = None
