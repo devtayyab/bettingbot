@@ -269,7 +269,7 @@ class TheOddsAPISource:
                     bm.get("key", "") for bm in bookmakers if bm.get("key")
                 )
                 target_bm = next(
-                    (bm for bm in bookmakers if bm.get("key") == self.target_bookmaker),
+                    (bm for bm in bookmakers if bm.get("key") in ([self.target_bookmaker, "betfair_ex_uk", "betfair_ex_eu", "betfair"] if "betfair" in self.target_bookmaker else ([self.target_bookmaker, "betano_uk", "stoiximan"] if ("stoiximan" in self.target_bookmaker or "betano" in self.target_bookmaker) else [self.target_bookmaker]))),
                     None,
                 )
                 if not target_bm:

@@ -24,7 +24,7 @@ const COLUMN_LABELS: Record<string, string> = {
   event_start_time: 'Match Played At',
   target_bookmaker: 'Platform (Stoiximan)',
   target_odds: 'Target Odds (Stoiximan)',
-  betfair_odds: 'Sharp Fair Odds',
+  betfair_odds: 'Betfair Odds',
   pinnacle_odds: 'Pinnacle Odds',
   edge: 'Edge %',
   fair_prob: 'Fair Probability',

@@ -264,6 +264,10 @@ def save_signal(
             prev.fair_prob = sig.fair_prob
             prev.confirm_prob = sig.confirm_prob
             prev.target_odds = sig.target_odds
+            if sig.betfair_odds is not None:
+                prev.betfair_odds = sig.betfair_odds
+            if sig.pinnacle_odds is not None:
+                prev.pinnacle_odds = sig.pinnacle_odds
             prev.edge = sig.edge
             prev.recommended_stake = sig.recommended_stake
             prev.detected_at = sig.detected_at
@@ -302,6 +306,8 @@ def save_signal(
         fair_prob=sig.fair_prob,
         confirm_prob=sig.confirm_prob,
         target_odds=sig.target_odds,
+        betfair_odds=sig.betfair_odds,
+        pinnacle_odds=sig.pinnacle_odds,
         edge=sig.edge,
         recommended_stake=sig.recommended_stake,
         status="detected",
@@ -323,6 +329,8 @@ def save_signal(
         sport=sig.sport.value,
         target_bookmaker=sig.target_bookmaker,
         target_odds=sig.target_odds,
+        betfair_odds=sig.betfair_odds,
+        pinnacle_odds=sig.pinnacle_odds,
         edge=round(sig.edge, 4),
         recommended_stake=sig.recommended_stake,
     )
@@ -756,8 +764,8 @@ def generate_report(
         pot_profit_val = round(effective_stake * (effective_odds - 1), 2)
         pot_profit_pct = round((effective_odds - 1) * 100, 1)
 
-        bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
-        pin_odds = round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None
+        bf_odds = sig.betfair_odds if getattr(sig, "betfair_odds", None) is not None else (round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None)
+        pin_odds = sig.pinnacle_odds if getattr(sig, "pinnacle_odds", None) is not None else (round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None)
         btype = classify_bet_type(sig.market_type, sig.selection)
         ev_name = infer_event_name(sig) or "—"
         score_str = extract_final_score(bet) or "—"

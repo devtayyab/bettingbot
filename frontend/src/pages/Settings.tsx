@@ -40,7 +40,14 @@ interface ConfigData {
   placement_bookmaker: string;
   odds_api_markets?: string;
   odds_api_fetch_lay?: boolean;
+  active_sports?: string;
 }
+
+const SPORT_OPTIONS = [
+  { key: 'soccer', label: '⚽ Football / Soccer', desc: 'Premier League, La Liga, Serie A, Champions League, etc.' },
+  { key: 'basketball', label: '🏀 Basketball', desc: 'NBA, Euroleague' },
+  { key: 'tennis', label: '🎾 Tennis', desc: 'ATP, WTA Grand Slams & Tours' },
+];
 
 const MARKET_OPTIONS = [
   { key: 'h2h', label: 'Match Winner / 1X2 (h2h)', desc: 'Home Win, Draw, Away Win (Football, Basketball, Tennis)' },
@@ -54,12 +61,19 @@ const FIELD_LABELS: Record<
     label: string;
     description: string;
     recommended?: string;
-    type: 'percent' | 'number' | 'boolean' | 'markets';
+    type: 'percent' | 'number' | 'boolean' | 'markets' | 'sports';
     min?: number;
     max?: number;
     step?: number;
   }
 > = {
+  active_sports: {
+    label: 'Sports to Scan',
+    description:
+      'Choose which sports the automated scanner checks. Selecting only Football/Soccer saves thousands of API credits by skipping sports you do not bet on (Darts, MMA, Table Tennis).',
+    recommended: 'Football / Soccer',
+    type: 'sports',
+  },
   odds_api_markets: {
     label: 'Bet Markets to Scan',
     description:
@@ -349,6 +363,7 @@ const GROUPS = [
     title: '🎯 Value Detection & Bet Markets',
     subtitle: 'Controls which sports markets are scanned, minimum value edge, odds limits, and the 1.5% re-read rule.',
     fields: [
+      'active_sports',
       'odds_api_markets',
       'edge_threshold',
       'live_edge_threshold',
@@ -530,6 +545,18 @@ export const Settings: React.FC = () => {
     handleChange('odds_api_markets', next.join(','));
   };
 
+  const toggleSportOption = (sportKey: string) => {
+    const raw = String(getValue('active_sports') || 'soccer');
+    const current = raw
+      .split(',')
+      .map((m) => m.trim().toLowerCase())
+      .filter(Boolean);
+    const exists = current.includes(sportKey);
+    let next = exists ? current.filter((m) => m !== sportKey) : [...current, sportKey];
+    if (next.length === 0) next = ['soccer'];
+    handleChange('active_sports', next.join(','));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -613,7 +640,42 @@ export const Settings: React.FC = () => {
           <span className="config-field__desc">{meta.description}</span>
         </div>
 
-        {meta.type === 'markets' ? (
+        {meta.type === 'sports' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+            {SPORT_OPTIONS.map((opt) => {
+              const selected = String(val || 'soccer')
+                .split(',')
+                .map((s) => s.trim().toLowerCase())
+                .includes(opt.key);
+              return (
+                <label
+                  key={opt.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    background: selected ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,255,255,0.03)',
+                    border: selected ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(255,255,255,0.08)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleSportOption(opt.key)}
+                    style={{ marginTop: '3px', accentColor: 'var(--brand-accent)' }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text-primary)' }}>{opt.label}</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{opt.desc}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ) : meta.type === 'markets' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
             {MARKET_OPTIONS.map((opt) => {
               const selected = String(val || 'h2h')
