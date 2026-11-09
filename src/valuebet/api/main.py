@@ -6,19 +6,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import get_settings, reset_settings_cache, sync_dotenv_to_environ, write_dotenv_updates
+from ..config import (
+    get_settings,
+    sync_dotenv_to_environ,
+    write_dotenv_updates,
+)
 from ..core.models import Sport
 from ..db.init import ensure_schema_columns
 from ..db.models import Bet, Signal
@@ -66,11 +70,21 @@ async def lifespan(app: FastAPI):
     scheduler = None
     if s.enable_embedded_scheduler:
         import threading
+
         from apscheduler.schedulers.background import BackgroundScheduler
-        from ..scheduler.run import _execute_bets, _scan_live, _scan_prematch, _settle_bets, _track_clv
+
+        from ..scheduler.run import (
+            _execute_bets,
+            _scan_live,
+            _scan_prematch,
+            _settle_bets,
+            _track_clv,
+        )
 
         scheduler = BackgroundScheduler(timezone="UTC")
-        scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
+        scheduler.add_job(
+            _scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch"
+        )
         scheduler.add_job(_scan_live, "interval", seconds=s.poll_interval_live, id="live")
         scheduler.add_job(_execute_bets, "interval", seconds=30, id="executor")
         scheduler.add_job(_track_clv, "interval", minutes=5, id="clv_tracker")
@@ -99,6 +113,7 @@ async def lifespan(app: FastAPI):
             pass
     try:
         from ..engine.executor import PlacementRouter
+
         PlacementRouter.shared().close_all()
     except Exception:
         pass
@@ -243,8 +258,16 @@ class OddsApiKeyIn(BaseModel):
 
 
 def _to_out(s: Signal) -> SignalOut:
-    bf_odds = s.betfair_odds if getattr(s, "betfair_odds", None) is not None else (round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None)
-    pin_odds = s.pinnacle_odds if getattr(s, "pinnacle_odds", None) is not None else (round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None)
+    bf_odds = (
+        s.betfair_odds
+        if getattr(s, "betfair_odds", None) is not None
+        else (round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None)
+    )
+    pin_odds = (
+        s.pinnacle_odds
+        if getattr(s, "pinnacle_odds", None) is not None
+        else (round(1.0 / s.confirm_prob, 2) if s.confirm_prob and s.confirm_prob > 0 else None)
+    )
     btype = classify_bet_type(s.market_type, s.selection)
     ev_name = infer_event_name(s)
 
@@ -261,11 +284,17 @@ def _to_out(s: Signal) -> SignalOut:
 
     if all_market_odds:
         draw_item = next(
-            (item for item in all_market_odds.items() if item[0].strip().lower() in ("draw", "tie", "x")),
+            (
+                item
+                for item in all_market_odds.items()
+                if item[0].strip().lower() in ("draw", "tie", "x")
+            ),
             None,
         )
         team_items = [
-            item for item in all_market_odds.items() if item[0].strip().lower() not in ("draw", "tie", "x")
+            item
+            for item in all_market_odds.items()
+            if item[0].strip().lower() not in ("draw", "tie", "x")
         ]
         if draw_item and len(team_items) >= 2:
             all_market_odds = {
@@ -319,7 +348,7 @@ def _parse_dt(s: str | None) -> datetime | None:
     try:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except ValueError:
         return None
@@ -339,6 +368,7 @@ def favicon():
 def _close_placers() -> None:
     try:
         from ..engine.executor import PlacementRouter
+
         PlacementRouter.shared().close_all()
     except Exception as exc:  # noqa: BLE001
         log.warning("placer_shutdown_failed", error=str(exc))
@@ -353,6 +383,7 @@ def _close_placers() -> None:
 def health() -> dict:
     s = get_settings()
     from ..placement.session_store import get_cookie_status
+
     cookies = get_cookie_status()
     return {
         "status": "ok",
@@ -424,6 +455,7 @@ def get_config() -> dict:
 def upload_cookies(cookies: list[dict[str, Any]]) -> dict:
     """Upload raw JSON cookies from browser extension."""
     from ..placement.session_store import save_raw_cookie_list
+
     try:
         count = save_raw_cookie_list(cookies)
         return {"message": f"Successfully saved {count} cookies."}
@@ -435,6 +467,7 @@ def upload_cookies(cookies: list[dict[str, Any]]) -> dict:
 def clear_cookies_legacy() -> dict:
     """Delete saved cookies (legacy endpoint)."""
     from ..placement.session_store import delete_cookie_file
+
     delete_cookie_file()
     return {"message": "Cookies deleted."}
 
@@ -458,6 +491,7 @@ async def get_odds_api_status() -> dict:
 
     masked = (key[:6] + "..." + key[-4:]) if len(key) > 10 else "***"
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={key}")
@@ -529,16 +563,24 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
         raise HTTPException(400, "API key cannot be empty")
 
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={new_key}")
             rem = resp.headers.get("x-requests-remaining")
             used = resp.headers.get("x-requests-used")
             if resp.status_code != 200:
-                detail = "Invalid or expired key (Unauthorized 401)" if resp.status_code == 401 else f"Status {resp.status_code}"
+                detail = (
+                    "Invalid or expired key (Unauthorized 401)"
+                    if resp.status_code == 401
+                    else f"Status {resp.status_code}"
+                )
                 raise HTTPException(400, f"API key test failed: {detail}")
             if rem and rem.isdigit() and int(rem) <= 0:
-                raise HTTPException(400, "This API key has 0 requests remaining (quota exhausted). Please enter a key with available quota.")
+                raise HTTPException(
+                    400,
+                    "This API key has 0 requests remaining (quota exhausted). Please enter a key with available quota.",
+                )
     except httpx.HTTPError as exc:
         raise HTTPException(400, f"Failed to connect to The Odds API: {exc}")
 
@@ -547,6 +589,7 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
     # Clear any quota-exhausted circuit breakers and cached active-sport lists immediately
     from ..core import results as _results_mod
     from ..sources import the_odds_api as _odds_mod
+
     _odds_mod._QUOTA_EXHAUSTED_UNTIL = None
     _odds_mod._ACTIVE_KEYS_CACHE.clear()
     _results_mod._SCORES_QUOTA_EXHAUSTED_UNTIL = None
@@ -580,9 +623,7 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
 @app.patch("/config")
 def patch_config(body: ConfigUpdateIn) -> dict:
     """Update editable config variables (writes to .env file and updates runtime)."""
-    updates: dict[str, Any] = {
-        k: v for k, v in body.model_dump().items() if v is not None
-    }
+    updates: dict[str, Any] = {k: v for k, v in body.model_dump().items() if v is not None}
     env_map: dict[str, str] = {}
     for k, v in updates.items():
         if isinstance(v, bool):
@@ -601,7 +642,9 @@ def patch_config(body: ConfigUpdateIn) -> dict:
         s = get_settings()
         if "poll_interval_prematch" in updates:
             try:
-                sched.reschedule_job("prematch", trigger="interval", seconds=s.poll_interval_prematch)
+                sched.reschedule_job(
+                    "prematch", trigger="interval", seconds=s.poll_interval_prematch
+                )
             except Exception:
                 pass
         if "poll_interval_live" in updates:
@@ -678,6 +721,7 @@ def list_signals(status: str | None = None) -> list[SignalOut]:
 @app.get("/signals/feed")
 async def signals_feed() -> StreamingResponse:
     """Server-Sent Events endpoint — pushes new & updated signals in real time."""
+
     async def _generator() -> AsyncIterator[str]:
         last_fingerprint: set[tuple] | None = None
         while True:
@@ -685,7 +729,13 @@ async def signals_feed() -> StreamingResponse:
                 with session_scope() as session:
                     sigs = open_signals(session)
                     fingerprint = {
-                        (s.id, round(s.edge, 4), round(s.target_odds, 3), s.status, round(s.recommended_stake, 2))
+                        (
+                            s.id,
+                            round(s.edge, 4),
+                            round(s.target_odds, 3),
+                            s.status,
+                            round(s.recommended_stake, 2),
+                        )
                         for s in sigs
                     }
                     if last_fingerprint is None or fingerprint != last_fingerprint:
@@ -721,9 +771,14 @@ def approve_signal(signal_id: int) -> dict:
             log.warning("approve_rejected_bad_state", signal_id=signal_id, status=sig.status)
             raise HTTPException(409, f"signal is '{sig.status}', cannot approve")
         sig.status = "approved"
-        log.info("signal_approved", signal_id=signal_id, selection=sig.selection,
-                 target_odds=sig.target_odds, recommended_stake=sig.recommended_stake,
-                 edge=round(sig.edge, 4))
+        log.info(
+            "signal_approved",
+            signal_id=signal_id,
+            selection=sig.selection,
+            target_odds=sig.target_odds,
+            recommended_stake=sig.recommended_stake,
+            edge=round(sig.edge, 4),
+        )
     return {"id": signal_id, "status": "approved"}
 
 
@@ -736,8 +791,12 @@ def reject_signal(signal_id: int) -> dict:
             raise HTTPException(404, "signal not found")
         previous = sig.status
         sig.status = "rejected"
-        log.info("signal_rejected", signal_id=signal_id, selection=sig.selection,
-                 previous_status=previous)
+        log.info(
+            "signal_rejected",
+            signal_id=signal_id,
+            selection=sig.selection,
+            previous_status=previous,
+        )
     return {"id": signal_id, "status": "rejected"}
 
 
@@ -795,9 +854,12 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
             dry_run=s.placement_dry_run,
         )
         request = PlacementRequest(
-            event_id=str(sig.event_id), market_type=sig.market_type,
-            selection=sig.selection, target_odds=sig.target_odds,
-            stake=sig.recommended_stake, min_odds=min_odds,
+            event_id=str(sig.event_id),
+            market_type=sig.market_type,
+            selection=sig.selection,
+            target_odds=sig.target_odds,
+            stake=sig.recommended_stake,
+            min_odds=min_odds,
         )
         from ..engine.executor import PlacementRouter
         from ..placement.base import PlacementStatus
@@ -838,30 +900,38 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
 
         if result.status == PlacementStatus.DRY_RUN:
             bet = record_bet(
-                session, sig,
+                session,
+                sig,
                 placed_odds=result.placed_odds or sig.target_odds,
                 stake=result.accepted_stake,
                 requested_stake=result.requested_stake,
-                dry_run=True, note=result.message,
-                bookmaker=result.bookmaker, verified=False,
+                dry_run=True,
+                note=result.message,
+                bookmaker=result.bookmaker,
+                verified=False,
             )
             return payload(bet.id)
 
         if not result.is_real_bet:
             if result.status == PlacementStatus.REJECTED:
                 save_limit_event(
-                    session, bookmaker=result.bookmaker,
+                    session,
+                    bookmaker=result.bookmaker,
                     requested_stake=result.requested_stake,
-                    accepted_stake=0.0, was_rejected=True, note=result.message,
+                    accepted_stake=0.0,
+                    was_rejected=True,
+                    note=result.message,
                 )
             return payload(None)
 
         bet = record_bet(
-            session, sig,
+            session,
+            sig,
             placed_odds=result.placed_odds or sig.target_odds,
             stake=result.accepted_stake,
             requested_stake=result.requested_stake,
-            dry_run=False, note=result.message,
+            dry_run=False,
+            note=result.message,
             bookmaker=result.bookmaker,
             verified=result.verified_on_platform,
         )
@@ -874,9 +944,13 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
             note=result.message,
         )
         if result.needs_manual_check:
-            log.error("placement_unconfirmed", signal_id=signal_id,
-                      selection=sig.selection, stake=result.accepted_stake,
-                      msg=result.message)
+            log.error(
+                "placement_unconfirmed",
+                signal_id=signal_id,
+                selection=sig.selection,
+                stake=result.accepted_stake,
+                msg=result.message,
+            )
         return payload(bet.id)
 
 
@@ -901,7 +975,7 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
             bet.profit = -bet.stake
         else:
             bet.profit = 0.0
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now_iso = now_dt.isoformat()
         bet.settled_at = now_dt
         if body.final_score:
@@ -910,10 +984,17 @@ def settle_bet(bet_id: int, body: SettleIn) -> dict:
         if "settled_at:" in clean_note:
             clean_note = re.sub(r"settled_at:\S+\s*", "", clean_note).strip()
         bet.note = f"settled_at:{now_iso} {clean_note}".strip()[:510]
-        log.info("bet_settled", bet_id=bet_id, selection=bet.selection,
-                 previous_outcome=previous, outcome=body.outcome,
-                 stake=bet.stake, placed_odds=bet.placed_odds,
-                 profit=bet.profit, dry_run=bet.dry_run)
+        log.info(
+            "bet_settled",
+            bet_id=bet_id,
+            selection=bet.selection,
+            previous_outcome=previous,
+            outcome=body.outcome,
+            stake=bet.stake,
+            placed_odds=bet.placed_odds,
+            profit=bet.profit,
+            dry_run=bet.dry_run,
+        )
         return {
             "bet_id": bet_id,
             "outcome": body.outcome,
@@ -948,6 +1029,7 @@ def get_results(
     """Return bets with full match name, actual bet, match played time, official score, and settlement time."""
     with session_scope() as session:
         from sqlalchemy import select
+
         stmt = (
             select(Bet, Signal)
             .join(Signal, Bet.signal_id == Signal.id)
@@ -977,36 +1059,44 @@ def get_results(
                 profit_pct = 0.0
 
             bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
-            pin_odds = round(1.0 / sig.confirm_prob, 2) if sig.confirm_prob and sig.confirm_prob > 0 else None
+            pin_odds = (
+                round(1.0 / sig.confirm_prob, 2)
+                if sig.confirm_prob and sig.confirm_prob > 0
+                else None
+            )
             btype = classify_bet_type(sig.market_type, bet.selection)
 
-            results.append({
-                "bet_id": bet.id,
-                "signal_id": sig.id,
-                "event_name": ev_name,
-                "selection": bet.selection,
-                "sport": sig.sport,
-                "market_type": sig.market_type,
-                "bet_type": btype,
-                "is_live": bool(sig.is_live),
-                "placed_odds": bet.placed_odds,
-                "stake": bet.stake,
-                "outcome": bet.outcome,
-                "final_score": score_str,
-                "profit": profit_val,
-                "profit_pct": profit_pct,
-                "edge": sig.edge,
-                "fair_prob": sig.fair_prob,
-                "betfair_odds": bf_odds,
-                "pinnacle_odds": pin_odds,
-                "accuracy": round(sig.fair_prob * 100, 1),
-                "event_start_time": sig.event_start_time.isoformat() if sig.event_start_time else None,
-                "signal_generated_at": sig.detected_at.isoformat() if sig.detected_at else None,
-                "bet_placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
-                "end_time": settled_time_str,
-                "bookmaker": bet.book or "stoiximan",
-                "dry_run": bet.dry_run,
-            })
+            results.append(
+                {
+                    "bet_id": bet.id,
+                    "signal_id": sig.id,
+                    "event_name": ev_name,
+                    "selection": bet.selection,
+                    "sport": sig.sport,
+                    "market_type": sig.market_type,
+                    "bet_type": btype,
+                    "is_live": bool(sig.is_live),
+                    "placed_odds": bet.placed_odds,
+                    "stake": bet.stake,
+                    "outcome": bet.outcome,
+                    "final_score": score_str,
+                    "profit": profit_val,
+                    "profit_pct": profit_pct,
+                    "edge": sig.edge,
+                    "fair_prob": sig.fair_prob,
+                    "betfair_odds": bf_odds,
+                    "pinnacle_odds": pin_odds,
+                    "accuracy": round(sig.fair_prob * 100, 1),
+                    "event_start_time": sig.event_start_time.isoformat()
+                    if sig.event_start_time
+                    else None,
+                    "signal_generated_at": sig.detected_at.isoformat() if sig.detected_at else None,
+                    "bet_placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
+                    "end_time": settled_time_str,
+                    "bookmaker": bet.book or "stoiximan",
+                    "dry_run": bet.dry_run,
+                }
+            )
         return results
 
 
@@ -1028,18 +1118,20 @@ def get_accounts() -> list[dict]:
         result = []
         for acc in accounts:
             activity = get_account_activity(session, acc.id)
-            result.append({
-                "id": acc.id,
-                "name": acc.name,
-                "bookmaker": acc.bookmaker,
-                "percentage_share": acc.percentage_share,
-                "initial_deposit": acc.initial_deposit,
-                "is_paused": acc.is_paused,
-                "created_at": acc.created_at.isoformat() if acc.created_at else None,
-                "total_bets": activity.get("total_bets", 0),
-                "net_profit": activity.get("net_profit", 0.0),
-                "roi": activity.get("roi", 0.0),
-            })
+            result.append(
+                {
+                    "id": acc.id,
+                    "name": acc.name,
+                    "bookmaker": acc.bookmaker,
+                    "percentage_share": acc.percentage_share,
+                    "initial_deposit": acc.initial_deposit,
+                    "is_paused": acc.is_paused,
+                    "created_at": acc.created_at.isoformat() if acc.created_at else None,
+                    "total_bets": activity.get("total_bets", 0),
+                    "net_profit": activity.get("net_profit", 0.0),
+                    "roi": activity.get("roi", 0.0),
+                }
+            )
         return result
 
 
@@ -1100,8 +1192,10 @@ def update_account_endpoint(account_id: int, body: AccountUpdateIn) -> dict:
 def get_notes(account_id: int) -> list[dict]:
     with session_scope() as session:
         notes = list_account_notes(session, account_id)
-        return [{"id": n.id, "content": n.content,
-                 "created_at": n.created_at.isoformat()} for n in notes]
+        return [
+            {"id": n.id, "content": n.content, "created_at": n.created_at.isoformat()}
+            for n in notes
+        ]
 
 
 @app.post("/accounts/{account_id}/notes")
@@ -1110,8 +1204,7 @@ def add_note(account_id: int, body: AccountNoteIn) -> dict:
         note = add_account_note(session, account_id, body.content)
         if not note:
             raise HTTPException(404, "account not found")
-        return {"id": note.id, "content": note.content,
-                "created_at": note.created_at.isoformat()}
+        return {"id": note.id, "content": note.content, "created_at": note.created_at.isoformat()}
 
 
 @app.delete("/accounts/{account_id}/notes/{note_id}")
@@ -1216,6 +1309,7 @@ def get_bookmaker_limits(bookmaker: str, last_n: int = 50) -> dict:
 @app.get("/cookie-status")
 def cookie_status() -> dict:
     from ..placement.session_store import get_cookie_status
+
     return get_cookie_status()
 
 
@@ -1228,6 +1322,7 @@ def import_cookies(body: CookieImport) -> dict:
     if not body.cookies:
         raise HTTPException(400, "cookies list is empty")
     from ..placement.session_store import save_raw_cookie_list
+
     try:
         count = save_raw_cookie_list(body.cookies)
         log.info("cookies_imported", count=count)
@@ -1243,15 +1338,18 @@ def import_cookies(body: CookieImport) -> dict:
 @app.get("/export-cookies")
 def export_cookies() -> list[dict]:
     from ..placement.session_store import read_cookie_json
+
     return read_cookie_json()
 
 
 @app.delete("/import-cookies")
 def clear_cookies() -> dict:
     from ..placement.session_store import delete_cookie_file
+
     deleted = delete_cookie_file()
-    log.warning("cookies_cleared", deleted=deleted,
-                msg="placement will re-login on the next attempt")
+    log.warning(
+        "cookies_cleared", deleted=deleted, msg="placement will re-login on the next attempt"
+    )
     if deleted:
         return {"success": True, "message": "Cookies cleared from JSON file."}
     return {"success": True, "message": "No cookie file found to delete."}

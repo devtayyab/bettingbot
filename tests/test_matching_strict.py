@@ -96,3 +96,4 @@ def test_provider_event_id_mismatch_rejects():
     )
     # Different provider event_id means different fixture
     assert match_markets(target, [cand_wrong_id]) is None
+
