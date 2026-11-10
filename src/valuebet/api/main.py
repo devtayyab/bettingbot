@@ -635,8 +635,12 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
     from ..sources import the_odds_api as _odds_mod
 
     _odds_mod._QUOTA_EXHAUSTED_UNTIL = None
-    _odds_mod._ACTIVE_KEYS_CACHE.clear()
+    _odds_mod._ACTIVE_SPORTS_CACHE = None
+    if hasattr(_odds_mod, "_ODDS_CACHE"):
+        _odds_mod._ODDS_CACHE.clear()
     _results_mod._SCORES_QUOTA_EXHAUSTED_UNTIL = None
+    if hasattr(_results_mod, "_SCORES_CACHE"):
+        _results_mod._SCORES_CACHE.clear()
 
     # Trigger an immediate background pre-match Soccer scan so live matches appear right away
     import threading
