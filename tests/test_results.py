@@ -161,3 +161,73 @@ def test_value_engine_pinnacle_fallback_for_totals_market():
     assert res.signals[0].selection == "Over 2.5"
     assert res.signals[0].event_name == "Arsenal vs Chelsea"
     assert res.signals[0].market_type == "TOTALS_2.5"
+
+
+def test_simulate_paper_bet_outcome_deterministic():
+    from valuebet.core.results import simulate_paper_bet_outcome
+
+    out1, score1, profit1 = simulate_paper_bet_outcome(
+        bet_id=123,
+        selection="Arsenal",
+        placed_odds=2.10,
+        stake=10.0,
+        sport="soccer",
+        fair_prob=0.55,
+        placed_at_iso="2026-11-10T05:00:00Z",
+    )
+    out2, score2, profit2 = simulate_paper_bet_outcome(
+        bet_id=123,
+        selection="Arsenal",
+        placed_odds=2.10,
+        stake=10.0,
+        sport="soccer",
+        fair_prob=0.55,
+        placed_at_iso="2026-11-10T05:00:00Z",
+    )
+    assert out1 == out2
+    assert score1 == score2
+    assert profit1 == profit2
+    if out1 == BetOutcome.WON:
+        assert profit1 == 11.0
+    else:
+        assert profit1 == -10.0
+
+
+def test_simulate_paper_bet_outcome_probabilities():
+    from valuebet.core.results import simulate_paper_bet_outcome
+
+    # High probability should resolve as WON
+    out_win, score_win, profit_win = simulate_paper_bet_outcome(
+        bet_id=999,
+        selection="Over 2.5",
+        placed_odds=1.50,
+        stake=20.0,
+        sport="soccer",
+        fair_prob=0.98,
+    )
+    assert out_win == BetOutcome.WON
+    assert profit_win == 10.0
+    assert score_win is not None
+
+    # Low probability should resolve as LOST
+    out_loss, score_loss, profit_loss = simulate_paper_bet_outcome(
+        bet_id=999,
+        selection="Under 2.5",
+        placed_odds=15.0,
+        stake=10.0,
+        sport="soccer",
+        fair_prob=0.02,
+    )
+    assert out_loss == BetOutcome.LOST
+    assert profit_loss == -10.0
+    assert score_loss is not None
+
+
+def test_espn_result_resolver_initialization():
+    from valuebet.core.results import ESPNResultResolver
+
+    resolver = ESPNResultResolver()
+    assert "soccer" in resolver.LEAGUES
+    assert "tennis" in resolver.LEAGUES
+    assert "basketball" in resolver.LEAGUES
+

@@ -192,6 +192,7 @@ def main() -> None:
         )
     _scan_prematch()
     _sync_goldedge()
+    _settle_bets()
     scheduler.start()
 
 

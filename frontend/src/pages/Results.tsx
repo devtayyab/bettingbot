@@ -84,15 +84,30 @@ export const Results: React.FC = () => {
       const res = await fetch(`${API}/bets/settle-all`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
-        setSyncMsg(data.message || `Synced official match scores (${data.settled ?? 0} settled).`);
+        setSyncMsg(data.message || `Settled finished matches (${data.settled ?? 0} settled).`);
         await fetchResults();
       } else {
-        setSyncMsg('Failed to sync official results.');
+        setSyncMsg('Failed to sync match outcomes.');
       }
     } catch {
-      setSyncMsg('Network error while syncing official scores.');
+      setSyncMsg('Network error while syncing scores.');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleManualSettle = async (betId: number, outcome: 'won' | 'lost' | 'void') => {
+    try {
+      const res = await fetch(`${API}/bets/${betId}/settle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outcome }),
+      });
+      if (res.ok) {
+        await fetchResults();
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -114,14 +129,14 @@ export const Results: React.FC = () => {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title text-gradient">🏆 Bet Results &amp; Official Scores</h1>
+          <h1 className="page-title text-gradient">🏆 Bet Results &amp; Match Outcomes</h1>
           <p className="page-subtitle">
-            Won &amp; Lost outcomes update automatically from official match scores every 15 minutes — view actual bet, match kickoff time, and final score
+            Won &amp; Lost outcomes update automatically from verified scores &amp; paper simulations — view actual bet, match kickoff time, and final score
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-sm" onClick={handleAutoSync} disabled={syncing}>
-            {syncing ? '⏳ Checking Official Scores…' : '⚡ Auto-Sync Match Scores Now'}
+            {syncing ? '⏳ Settling Finished Matches…' : '⚡ Settle Finished Matches Now'}
           </button>
           <button className="btn btn-secondary btn-sm" onClick={fetchResults} disabled={loading}>
             {loading ? 'Refreshing…' : '🔄 Refresh'}
@@ -274,25 +289,62 @@ export const Results: React.FC = () => {
                   return (
                     <tr key={r.bet_id}>
                       <td>
-                        <span
-                          className="pill"
-                          style={{
-                            background: isWon
-                              ? 'rgba(16, 185, 129, 0.2)'
-                              : isLost
-                                ? 'rgba(239, 68, 68, 0.2)'
-                                : 'rgba(245, 158, 11, 0.16)',
-                            color: isWon ? '#34d399' : isLost ? '#f87171' : '#fbbf24',
-                            fontWeight: 700,
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                          }}
-                        >
-                          {isWon ? '✓ WON' : isLost ? '✗ LOST' : isPending ? '⏳ PENDING' : 'VOID'}
-                        </span>
+                        {isPending ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span
+                              className="pill"
+                              style={{
+                                background: 'rgba(245, 158, 11, 0.16)',
+                                color: '#fbbf24',
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.72rem',
+                                textAlign: 'center',
+                              }}
+                            >
+                              ⏳ PENDING
+                            </span>
+                            <div style={{ display: 'flex', gap: '3px' }}>
+                              <button
+                                className="btn btn-sm btn-ghost"
+                                style={{ padding: '2px 5px', fontSize: '0.68rem', color: '#34d399', border: '1px solid rgba(52, 211, 153, 0.3)', flex: 1 }}
+                                title="Mark as Won"
+                                onClick={() => handleManualSettle(r.bet_id, 'won')}
+                              >
+                                ✓ Win
+                              </button>
+                              <button
+                                className="btn btn-sm btn-ghost"
+                                style={{ padding: '2px 5px', fontSize: '0.68rem', color: '#f87171', border: '1px solid rgba(248, 113, 113, 0.3)', flex: 1 }}
+                                title="Mark as Lost"
+                                onClick={() => handleManualSettle(r.bet_id, 'lost')}
+                              >
+                                ✗ Loss
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <span
+                            className="pill"
+                            style={{
+                              background: isWon
+                                ? 'rgba(16, 185, 129, 0.2)'
+                                : isLost
+                                  ? 'rgba(239, 68, 68, 0.2)'
+                                  : 'rgba(245, 158, 11, 0.16)',
+                              color: isWon ? '#34d399' : isLost ? '#f87171' : '#fbbf24',
+                              fontWeight: 700,
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            {isWon ? '✓ WON' : isLost ? '✗ LOST' : 'VOID'}
+                          </span>
+                        )}
                       </td>
                       <td>
                         {r.event_name && (
