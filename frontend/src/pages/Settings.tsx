@@ -432,6 +432,13 @@ export const Settings: React.FC = () => {
   const [cookieStatus, setCookieStatus] = useState<{ msg: string; type: string } | null>(null);
 
   // Demo Data Cleanup
+  // GoldEdge Integration
+  const [geCookieJson, setGeCookieJson] = useState('');
+  const [geCookieUploading, setGeCookieUploading] = useState(false);
+  const [geSyncing, setGeSyncing] = useState(false);
+  const [geCookieStatus, setGeCookieStatus] = useState<{ msg: string; type: string } | null>(null);
+
+  // Demo Data Cleanup
   const [purgingDemo, setPurgingDemo] = useState(false);
   const [purgeFeedback, setPurgeFeedback] = useState<string | null>(null);
 
@@ -577,6 +584,52 @@ export const Settings: React.FC = () => {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUploadGeCookies = async () => {
+    if (!geCookieJson.trim()) return;
+    setGeCookieUploading(true);
+    setGeCookieStatus(null);
+    try {
+      const parsed = JSON.parse(geCookieJson);
+      if (!Array.isArray(parsed)) throw new Error('Cookies must be a JSON array');
+      const res = await fetch(`${API}/goldedge/cookies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGeCookieStatus({ msg: data.message || 'GoldEdge cookies saved successfully!', type: 'success' });
+        setGeCookieJson('');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setGeCookieStatus({ msg: err.detail || 'Upload failed', type: 'error' });
+      }
+    } catch (e: any) {
+      setGeCookieStatus({ msg: e.message || 'Invalid JSON', type: 'error' });
+    } finally {
+      setGeCookieUploading(false);
+    }
+  };
+
+  const handleSyncGeFromSettings = async () => {
+    if (geSyncing) return;
+    setGeSyncing(true);
+    setGeCookieStatus({ msg: 'Syncing value bets from GoldEdge...', type: 'info' });
+    try {
+      const res = await fetch(`${API}/goldedge/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setGeCookieStatus({ msg: data.message || 'Sync complete!', type: 'success' });
+      } else {
+        setGeCookieStatus({ msg: data.detail || 'Sync failed', type: 'error' });
+      }
+    } catch (e: any) {
+      setGeCookieStatus({ msg: e.message, type: 'error' });
+    } finally {
+      setGeSyncing(false);
     }
   };
 
@@ -1062,6 +1115,128 @@ export const Settings: React.FC = () => {
             {purgeFeedback && (
               <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>{purgeFeedback}</span>
             )}
+          </div>
+        </div>
+
+        {/* GoldEdge Scanner Integration Card */}
+        <div className="glass-panel settings-group">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+            <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+              <span>🟡 GoldEdge Scanner Integration (Free Beta)</span>
+            </div>
+            <a
+              href="https://www.goldedge.net/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                textDecoration: 'none',
+                fontWeight: 600,
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.2), rgba(245,158,11,0.05))',
+                borderColor: '#f59e0b',
+                color: '#f59e0b',
+              }}
+            >
+              🌐 Open GoldEdge Website (goldedge.net) ↗
+            </a>
+          </div>
+
+          <div
+            style={{
+              background: 'rgba(245, 158, 11, 0.06)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              borderRadius: '6px',
+              padding: '14px 16px',
+              marginBottom: '16px',
+              fontSize: '0.85rem',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontWeight: 600, color: '#f59e0b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>📋 How to connect GoldEdge with this dashboard:</span>
+            </div>
+            <ol style={{ margin: 0, paddingLeft: '20px', color: 'var(--text-secondary)' }}>
+              <li style={{ marginBottom: '6px' }}>
+                <strong>Step 1:</strong> Click <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', fontWeight: 600, textDecoration: 'underline' }}>Open goldedge.net ↗</a> to open GoldEdge in a new browser tab and sign in (Google or email).
+              </li>
+              <li style={{ marginBottom: '6px' }}>
+                <strong>Step 2:</strong> In Chrome, install the free <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', fontWeight: 600, textDecoration: 'underline' }}>Cookie-Editor Extension ↗</a>. Open it on the <code>goldedge.net</code> tab, click <strong>Export</strong> (bottom right) ➔ <strong>Export as JSON</strong>.
+              </li>
+              <li>
+                <strong>Step 3:</strong> Paste the copied JSON below and click <strong>"Save GoldEdge Cookies"</strong>. Then click <strong>"🎯 Sync Value Bets Now"</strong> to fetch bets into your Live Feed!
+              </li>
+            </ol>
+          </div>
+
+          <div className="config-fields">
+            <div className="config-field">
+              <div className="config-field__header">
+                <label className="config-field__label">Upload GoldEdge Cookies JSON</label>
+                <span className="config-field__desc">
+                  Paste the JSON array exported from Cookie-Editor while logged into <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }}>goldedge.net</a>.
+                </span>
+              </div>
+              <textarea
+                value={geCookieJson}
+                onChange={(e) => setGeCookieJson(e.target.value)}
+                placeholder='[{"domain": ".goldedge.net", "name": "...", "value": "..."}]'
+                style={{
+                  width: '100%',
+                  minHeight: '80px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.8rem',
+                  background: 'var(--bg-elevated)',
+                  border: 'var(--glass-border)',
+                  color: 'var(--text-primary)',
+                  padding: '8px',
+                  borderRadius: '4px',
+                }}
+              />
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleUploadGeCookies}
+                  disabled={geCookieUploading || !geCookieJson.trim()}
+                >
+                  {geCookieUploading ? 'Saving...' : 'Save GoldEdge Cookies'}
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleSyncGeFromSettings}
+                  disabled={geSyncing}
+                  style={{ color: '#f59e0b', fontWeight: 600, border: '1px solid rgba(245, 158, 11, 0.4)' }}
+                >
+                  {geSyncing ? '⏳ Syncing...' : '🎯 Sync Value Bets Now'}
+                </button>
+                <a
+                  href="https://www.goldedge.net/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: '#94a3b8', textDecoration: 'none' }}
+                >
+                  🌐 Visit GoldEdge Website ↗
+                </a>
+                {geCookieStatus && (
+                  <span
+                    style={{
+                      fontSize: '0.85rem',
+                      color:
+                        geCookieStatus.type === 'error'
+                          ? 'var(--status-danger)'
+                          : geCookieStatus.type === 'info'
+                          ? '#38bdf8'
+                          : 'var(--status-success)',
+                    }}
+                  >
+                    {geCookieStatus.msg}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

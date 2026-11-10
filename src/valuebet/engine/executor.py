@@ -122,7 +122,18 @@ class Executor:
 
                 # 3. Execute via Router
                 bookmaker_name = getattr(sig, "target_bookmaker", None) or "stoiximan"
-                placer = self.router.get_placer(bookmaker_name)
+                bm_lower = bookmaker_name.lower()
+                if "betano" in bm_lower or "stoiximan" in bm_lower:
+                    placer = self.router.get_placer("stoiximan")
+                elif "bet365" in bm_lower:
+                    placer = self.router.get_placer("bet365")
+                else:
+                    placer = self.router.get_placer(bookmaker_name)
+
+                if not placer and s.placement_dry_run:
+                    # In simulation (dry run), fallback to default placer so bet is recorded as paper
+                    placer = self.router.get_placer(s.placement_bookmaker or "stoiximan")
+
                 if not placer:
                     log.error("no_placer_configured", bookmaker=bookmaker_name)
                     sig.status = "rejected"

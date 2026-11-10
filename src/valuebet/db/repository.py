@@ -710,7 +710,7 @@ def open_signals(session: Session, status: str | None = None) -> list[Signal]:
 
     else:
 
-        stmt = stmt.where(Signal.status.in_(["detected", "approved"]))
+        stmt = stmt.where(Signal.status.in_(["detected", "approved", "paper"])).limit(100)
 
     return list(session.scalars(stmt))
 

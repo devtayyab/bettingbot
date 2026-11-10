@@ -102,6 +102,18 @@ def _track_clv() -> None:
         log.error("clv_tracking_failed", error=str(exc))
 
 
+def _sync_goldedge() -> None:
+    """Automated periodic scan of GoldEdge scanner for value bets (zero API credits)."""
+    _reload_env_if_changed()
+    try:
+        from ..sources.goldedge import sync_goldedge_to_db
+        count = sync_goldedge_to_db(min_edge=0.015)
+        if count > 0:
+            log.info("goldedge_auto_sync_complete", new_signals=count)
+    except Exception as exc:
+        log.warning("goldedge_auto_sync_failed", error=str(exc))
+
+
 def _settle_bets() -> None:
     """Automatically settle pending bets using official match scores from The Odds API."""
     _reload_env_if_changed()
@@ -121,6 +133,7 @@ def main() -> None:
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(_scan_prematch, "interval", seconds=s.poll_interval_prematch, id="prematch")
     scheduler.add_job(_scan_live, "interval", seconds=s.poll_interval_live, id="live")
+    scheduler.add_job(_sync_goldedge, "interval", seconds=120, id="goldedge_sync")
     scheduler.add_job(_execute_bets, "interval", seconds=30, id="executor")
     scheduler.add_job(_track_clv, "interval", minutes=5, id="clv_tracker")
     scheduler.add_job(_settle_bets, "interval", minutes=15, id="settlement")
@@ -178,6 +191,7 @@ def main() -> None:
                 "`python -m valuebet.cli login-stoiximan` or import cookies",
         )
     _scan_prematch()
+    _sync_goldedge()
     scheduler.start()
 
 

@@ -211,6 +211,7 @@ export const LiveFeed: React.FC = () => {
   const [betTypeFilter, setBetTypeFilter] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [scanning, setScanning] = useState(false);
+  const [syncingGoldEdge, setSyncingGoldEdge] = useState(false);
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
   const { toasts, toast } = useToast();
 
@@ -226,6 +227,25 @@ export const LiveFeed: React.FC = () => {
       })
       .catch(() => {});
   }, []);
+
+  const handleSyncGoldEdge = async () => {
+    if (syncingGoldEdge) return;
+    setSyncingGoldEdge(true);
+    toast('Syncing value bets from GoldEdge...', 'info');
+    try {
+      const res = await fetch(`${API}/goldedge/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || 'GoldEdge sync completed!', 'success');
+      } else {
+        toast(data.detail || 'GoldEdge sync failed', 'danger');
+      }
+    } catch (e: any) {
+      toast(`GoldEdge sync error: ${e.message}`, 'danger');
+    } finally {
+      setSyncingGoldEdge(false);
+    }
+  };
 
   const handleTriggerScan = async () => {
     if (scanning) return;
@@ -419,6 +439,27 @@ export const LiveFeed: React.FC = () => {
           >
             {scanning ? '⏳ Scanning...' : '⚡ Scan Now'}
           </button>
+
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleSyncGoldEdge}
+            disabled={syncingGoldEdge}
+            title="Sync value bets directly from GoldEdge scanner"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#f59e0b' }}
+          >
+            {syncingGoldEdge ? '⏳ Syncing...' : '🎯 Sync GoldEdge'}
+          </button>
+
+          <a
+            href="https://www.goldedge.net/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-ghost btn-sm"
+            title="Open GoldEdge website in a new tab"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', color: '#f59e0b' }}
+          >
+            🌐 GoldEdge.net ↗
+          </a>
 
           <button
             className="btn btn-ghost btn-sm"
