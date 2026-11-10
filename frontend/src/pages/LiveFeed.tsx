@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFeed, type SignalData } from '../hooks/useFeed';
 import { EditBetModal } from '../components/EditBetModal';
 
@@ -213,7 +213,13 @@ export const LiveFeed: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [syncingGoldEdge, setSyncingGoldEdge] = useState(false);
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number | 'all'>(25);
   const { toasts, toast } = useToast();
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sportFilter, marketFilter, betTypeFilter]);
 
   useEffect(() => {
     fetch(`${API}/odds-api/status`)
@@ -353,6 +359,92 @@ export const LiveFeed: React.FC = () => {
   const onEditSave = (id: number, updates: Partial<SignalData>) => {
     setLocalSignals((prev) => new Map(prev).set(id, { ...(prev.get(id) ?? {}), ...updates }));
     toast('Bet updated', 'success');
+  };
+
+  const totalSignals = filtered.length;
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalSignals / Number(pageSize)));
+  const paginatedSignals = useMemo(() => {
+    if (pageSize === 'all') return filtered;
+    const start = (currentPage - 1) * Number(pageSize);
+    return filtered.slice(start, start + Number(pageSize));
+  }, [filtered, currentPage, pageSize]);
+
+  const renderPagination = (position: 'top' | 'bottom') => {
+    if (totalSignals === 0) return null;
+    const startIdx = pageSize === 'all' ? 1 : (currentPage - 1) * Number(pageSize) + 1;
+    const endIdx = pageSize === 'all' ? totalSignals : Math.min(currentPage * Number(pageSize), totalSignals);
+
+    return (
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          padding: '10px 16px',
+          background: 'rgba(255, 255, 255, 0.03)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          margin: position === 'top' ? '0 0 var(--space-4) 0' : 'var(--space-4) 0 0 0',
+        }}
+      >
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          Showing <span style={{ color: '#fff', fontWeight: 600 }}>{startIdx}–{endIdx}</span> of <span style={{ color: '#fff', fontWeight: 600 }}>{totalSignals}</span> signals
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                setPageSize(val);
+                setCurrentPage(1);
+              }}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--bg-elevated)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                color: '#fff',
+                fontSize: '0.82rem',
+              }}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value="all">All ({totalSignals})</option>
+            </select>
+          </div>
+
+          {pageSize !== 'all' && totalPages > 1 && (
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+              >
+                ◀ Prev
+              </button>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', padding: '0 6px' }}>
+                Page <span style={{ color: '#38bdf8', fontWeight: 700 }}>{currentPage}</span> of {totalPages}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+              >
+                Next ▶
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -504,9 +596,11 @@ export const LiveFeed: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="bet-cards">
-          {filtered.map((s) => {
-            const isExpanded = expandedIds.has(s.id);
+        <>
+          {renderPagination('top')}
+          <div className="bet-cards">
+            {paginatedSignals.map((s) => {
+              const isExpanded = expandedIds.has(s.id);
             const edgeClass = s.edge > 0.08 ? 'edge-high' : s.edge > 0.03 ? 'edge-medium' : 'edge-low';
             const delta = formatDelta(s.fair_prob, s.confirm_prob);
             const winAccuracy = (s.fair_prob * 100).toFixed(1).replace('.', ',');
@@ -777,7 +871,9 @@ export const LiveFeed: React.FC = () => {
             );
           })}
         </div>
-      )}
+        {renderPagination('bottom')}
+      </>
+    )}
 
       {editSignal && (
         <EditBetModal

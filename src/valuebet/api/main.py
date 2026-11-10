@@ -761,9 +761,9 @@ def trigger_scan(sport: str = "all", live: bool = False) -> dict:
 
 
 @app.get("/signals", response_model=list[SignalOut])
-def list_signals(status: str | None = None) -> list[SignalOut]:
+def list_signals(status: str | None = None, limit: int = 500) -> list[SignalOut]:
     with session_scope() as session:
-        return [_to_out(s) for s in open_signals(session, status)]
+        return [_to_out(s) for s in open_signals(session, status, limit=limit)]
 
 
 @app.get("/signals/feed")
@@ -775,7 +775,7 @@ async def signals_feed() -> StreamingResponse:
         while True:
             try:
                 with session_scope() as session:
-                    sigs = open_signals(session)
+                    sigs = open_signals(session, limit=500)
                     fingerprint = {
                         (
                             s.id,
@@ -1176,6 +1176,9 @@ def get_accounts() -> list[dict]:
                     "is_paused": acc.is_paused,
                     "created_at": acc.created_at.isoformat() if acc.created_at else None,
                     "total_bets": activity.get("total_bets", 0),
+                    "won_bets": activity.get("won_bets", 0),
+                    "lost_bets": activity.get("lost_bets", 0),
+                    "pending_bets": activity.get("pending_bets", 0),
                     "net_profit": activity.get("net_profit", 0.0),
                     "roi": activity.get("roi", 0.0),
                 }

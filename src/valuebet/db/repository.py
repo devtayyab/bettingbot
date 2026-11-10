@@ -700,18 +700,14 @@ def save_signal(
 
 
 
-def open_signals(session: Session, status: str | None = None) -> list[Signal]:
-
+def open_signals(session: Session, status: str | None = None, limit: int | None = 500) -> list[Signal]:
     stmt = select(Signal).order_by(Signal.detected_at.desc(), Signal.id.desc())
-
     if status:
-
         stmt = stmt.where(Signal.status == status)
-
     else:
-
-        stmt = stmt.where(Signal.status.in_(["detected", "approved", "paper"])).limit(100)
-
+        stmt = stmt.where(Signal.status.in_(["detected", "approved", "paper"]))
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return list(session.scalars(stmt))
 
 
@@ -1321,27 +1317,23 @@ def get_account_activity(session: Session, account_id: int) -> dict:
 
 
     roi = (net_profit / total_staked) if total_staked else 0.0
+    won_count = sum(1 for b in bets_placed if b["outcome"] == "won")
+    lost_count = sum(1 for b in bets_placed if b["outcome"] == "lost")
+    pending_count = sum(1 for b in bets_placed if b["outcome"] == "pending")
 
     return {
-
         "account_id": account_id,
-
         "name": acc.name,
-
         "initial_deposit": acc.initial_deposit,
-
         "percentage_share": acc.percentage_share,
-
         "is_paused": acc.is_paused,
-
         "total_bets": len(bets_placed),
-
+        "won_bets": won_count,
+        "lost_bets": lost_count,
+        "pending_bets": pending_count,
         "net_profit": round(net_profit, 2),
-
         "roi": round(roi, 4),
-
         "bets": bets_placed,
-
     }
 
 
