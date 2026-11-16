@@ -118,12 +118,16 @@ class GoldEdgeSource:
             log.error("playwright_missing", source="goldedge")
             return []
 
-        effective_min_edge = min_edge if min_edge is not None else getattr(self._settings, "goldedge_min_edge", 0.015)
+        effective_min_edge = max(
+            0.001,
+            min_edge if min_edge is not None else getattr(self._settings, "goldedge_min_edge", 0.015),
+        )
         signals: list[ValueSignal] = []
         now = datetime.now(UTC)
         date_str = now.strftime("%Y%m%d")
 
         urls_to_scan = [
+            (f"{_BASE_URL}/valuebets", False),
             (f"{_BASE_URL}/live", True),
             (f"{_BASE_URL}/", False),
         ]
@@ -144,7 +148,7 @@ class GoldEdgeSource:
                 # If cookies present, test if dashboard is accessible
                 if self.cookie_path.exists():
                     try:
-                        res = page.goto(f"{_BASE_URL}/valuebets/dashboard", wait_until="domcontentloaded", timeout=15000)
+                        page.goto(f"{_BASE_URL}/valuebets/dashboard", wait_until="domcontentloaded", timeout=15000)
                         page.wait_for_timeout(2000)
                         if "sign-in" not in page.url:
                             urls_to_scan.insert(0, (f"{_BASE_URL}/valuebets/dashboard", False))
@@ -155,6 +159,25 @@ class GoldEdgeSource:
                     try:
                         page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                         page.wait_for_timeout(2500)
+
+                        # On Open Value Bets pages, parse value-bet cards first
+                        if "/valuebets" in target_url:
+                            vb_cards = page.locator('[class*="card"], article, div:has-text("FAIR ODDS")').all()
+                            seen_vb_keys: set[str] = set()
+                            for idx, card in enumerate(vb_cards):
+                                try:
+                                    text = card.inner_text().strip()
+                                    if "FAIR ODDS" not in text and "EV" not in text:
+                                        continue
+                                    sig = self._parse_valuebet_card(text, idx=idx, now=now, min_edge=effective_min_edge, is_live=is_live)
+                                    if sig is not None:
+                                        dedup_key = f"{sig.event_name}|{sig.market_type}|{sig.selection}"
+                                        if dedup_key not in seen_vb_keys:
+                                            seen_vb_keys.add(dedup_key)
+                                            signals.append(sig)
+                                except Exception:
+                                    continue
+
                         cards = page.locator('a[href*="/odds/"]').all()
                         log.info("goldedge_scanned_elements", count=len(cards), url=target_url)
 
@@ -192,43 +215,35 @@ class GoldEdgeSource:
                                 event_name = f"{home} vs {away}"
                                 ev_hash = hashlib.md5(f"{event_name}_{date_str}".encode()).hexdigest()[:10]
 
-                                # 2-way match
+                                # 2-way match: require Betano/Stoiximan vs Pinnacle (or sharp reference)
                                 if len(odds_pairs) == 2:
                                     (o1, b1), (o2, b2) = odds_pairs[0], odds_pairs[1]
                                     p1_fair, p2_fair = _devig_2way(o1, o2)
                                     pairs_to_check = []
 
-                                    if "Pinnacle" in b2 and "Pinnacle" not in b1:
+                                    if "Pinnacle" in b2 and ("betano" in b1.lower() or "stoiximan" in b1.lower()):
                                         p1_est = max(0.02, 1.0 - (1.0 / o2 * 0.98))
                                         e1 = (p1_est * o1) - 1.0
-                                        if e1 >= effective_min_edge:
+                                        if e1 >= effective_min_edge and e1 > 0.0 and o1 > 1.0:
                                             pairs_to_check.append((home, o1, b1, o2, p1_est, e1))
-                                    elif "Pinnacle" in b1 and "Pinnacle" not in b2:
+                                    elif "Pinnacle" in b1 and ("betano" in b2.lower() or "stoiximan" in b2.lower()):
                                         p2_est = max(0.02, 1.0 - (1.0 / o1 * 0.98))
                                         e2 = (p2_est * o2) - 1.0
-                                        if e2 >= effective_min_edge:
+                                        if e2 >= effective_min_edge and e2 > 0.0 and o2 > 1.0:
                                             pairs_to_check.append((away, o2, b2, o1, p2_est, e2))
-                                    else:
-                                        e1 = (p1_fair * o1) - 1.0
-                                        e2 = (p2_fair * o2) - 1.0
-                                        if e1 >= effective_min_edge:
-                                            pairs_to_check.append((home, o1, b1, o2, p1_fair, e1))
-                                        elif e2 >= effective_min_edge:
-                                            pairs_to_check.append((away, o2, b2, o1, p2_fair, e2))
 
                                     for sel, odds, bookie, sharp_o, p_f, edge_val in pairs_to_check:
                                         stake = max(10.0, kelly_stake(p_f, odds, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
-                                        target_b = "stoiximan" if ("stoiximan" in bookie.lower() or "betano" in bookie.lower()) else bookie
                                         signals.append(
                                             ValueSignal(
-                                                event_id=f"ge_{ev_hash}_{sel[:4]}",
+                                                event_id=f"ge_{ev_hash}",
                                                 market_id=f"ge_m_{ev_hash}",
                                                 market_type="MATCH_ODDS",
                                                 selection=sel,
                                                 sport=sport,
                                                 fair_prob=round(p_f, 4),
                                                 confirm_prob=round(p_f, 4),
-                                                target_bookmaker=target_b,
+                                                target_bookmaker="stoiximan",
                                                 target_odds=odds,
                                                 edge=round(edge_val, 4),
                                                 recommended_stake=stake,
@@ -236,40 +251,43 @@ class GoldEdgeSource:
                                                 is_live=is_live,
                                                 event_name=event_name,
                                                 pinnacle_odds=sharp_o,
-                                                betfair_odds=sharp_o,
+                                                betfair_odds=None,
                                             )
                                         )
 
-                                # 3-way match
+                                # 3-way match: only emit Betano/Stoiximan selections with strictly positive edge
                                 elif len(odds_pairs) == 3:
                                     (o1, b1), (ox, bx), (o2, b2) = odds_pairs[0], odds_pairs[1], odds_pairs[2]
                                     p1, px, p2 = _devig_3way(o1, ox, o2)
 
                                     for sel, o, p_fair, bookie in [(home, o1, p1, b1), ("Draw", ox, px, bx), (away, o2, p2, b2)]:
+                                        b_lower = bookie.lower()
+                                        if "betano" not in b_lower and "stoiximan" not in b_lower:
+                                            continue
                                         edge_val = (p_fair * o) - 1.0
-                                        if ("Pinnacle" not in bookie and edge_val >= 0.0) or edge_val >= effective_min_edge:
-                                            eff_edge = max(effective_min_edge, edge_val)
+                                        if edge_val >= effective_min_edge and edge_val > 0.0:
                                             stake = max(10.0, kelly_stake(p_fair, o, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
-                                            target_b = "stoiximan" if ("stoiximan" in bookie.lower() or "betano" in bookie.lower()) else bookie
                                             sharp_p = round(1.0 / p_fair, 2) if p_fair > 0 else o
+                                            if o <= sharp_p:
+                                                continue
                                             signals.append(
                                                 ValueSignal(
-                                                    event_id=f"ge_{ev_hash}_{sel[:4]}",
+                                                    event_id=f"ge_{ev_hash}",
                                                     market_id=f"ge_m_{ev_hash}",
                                                     market_type="MATCH_ODDS",
                                                     selection=sel,
                                                     sport=sport,
                                                     fair_prob=round(p_fair, 4),
                                                     confirm_prob=round(p_fair, 4),
-                                                    target_bookmaker=target_b,
+                                                    target_bookmaker="stoiximan",
                                                     target_odds=o,
-                                                    edge=round(eff_edge, 4),
+                                                    edge=round(edge_val, 4),
                                                     recommended_stake=stake,
                                                     detected_at=now,
                                                     is_live=is_live,
                                                     event_name=event_name,
                                                     pinnacle_odds=sharp_p,
-                                                    betfair_odds=sharp_p,
+                                                    betfair_odds=None,
                                                 )
                                             )
                             except Exception:
@@ -284,6 +302,149 @@ class GoldEdgeSource:
 
         log.info("goldedge_signals_extracted", count=len(signals))
         return signals
+
+    def _parse_valuebet_card(
+        self,
+        text: str,
+        idx: int,
+        now: datetime,
+        min_edge: float,
+        is_live: bool = False,
+    ) -> ValueSignal | None:
+        """Parse a GoldEdge Open Value Bets card (Betano/Stoiximan vs Pinnacle Fair Odds)."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) < 5:
+            return None
+
+        # Only accept Betano or Stoiximan cards (Betano is Stoiximan)
+        text_lower = text.lower()
+        if "betano" not in text_lower and "stoiximan" not in text_lower:
+            return None
+
+        # 1. Edge % (first percentage token, e.g. '+7.09%')
+        edge_val: float | None = None
+        for line in lines[:5]:
+            m = re.search(r"([+-]?\d+(?:\.\d+)?)\s*%", line)
+            if m:
+                try:
+                    edge_val = float(m.group(1)) / 100.0
+                    break
+                except ValueError:
+                    continue
+
+        if edge_val is None or edge_val <= 0.0 or edge_val < min_edge:
+            return None
+
+        # 2. Sport detection
+        if "🎾" in text or "ATP" in text or "WTA" in text or "Set " in text:
+            sport = Sport.TENNIS
+        elif "🏀" in text or "NBA" in text or "Basketball" in text:
+            sport = Sport.BASKETBALL
+        else:
+            sport = Sport.SOCCER
+
+        # 3. Extract Betano/Stoiximan offered odds and Pinnacle/Fair odds
+        offered_odds: float | None = None
+        sharp_odds: float | None = None
+
+        for i, line in enumerate(lines):
+            ll = line.lower()
+            if ("betano" in ll or "stoiximan" in ll) and offered_odds is None:
+                # Odds may be on same line or next 1-2 lines
+                for cand in lines[i : i + 3]:
+                    m = re.search(r"\b(\d+\.\d{2})\b", cand)
+                    if m:
+                        val = float(m.group(1))
+                        if 1.02 <= val <= 100.0:
+                            offered_odds = val
+                            break
+            if ("fair odds" in ll or ll.startswith("pin ")) and sharp_odds is None:
+                for cand in lines[i : i + 3]:
+                    m = re.search(r"\b(\d+\.\d{2})\b", cand)
+                    if m:
+                        val = float(m.group(1))
+                        if 1.02 <= val <= 100.0:
+                            sharp_odds = val
+                            break
+
+        if offered_odds is None or sharp_odds is None:
+            return None
+        # Must be positive value against Pinnacle fair odds
+        if offered_odds <= sharp_odds:
+            return None
+
+        fair_prob = 1.0 / sharp_odds
+        computed_edge = (fair_prob * offered_odds) - 1.0
+        if computed_edge <= 0.0 or computed_edge < min_edge:
+            return None
+
+        # 4. Extract match teams & selection/market
+        # Filter out metadata lines to find team names and selection
+        teams: list[str] = []
+        selection = "Selection"
+        market_type = "MATCH_ODDS"
+
+        betano_idx = next(
+            (i for i, l in enumerate(lines) if "betano" in l.lower() or "stoiximan" in l.lower()),
+            len(lines),
+        )
+        header_lines = lines[:betano_idx]
+        for l in header_lines:
+            ll = l.lower()
+            if (
+                re.search(r"^\+?-?\d+(\.\d+)?%$", l)
+                or ll in ("ev", "strong", "best", "live")
+                or "ago" in ll
+                or "· in " in ll
+                or "·" in l and any(k in ll for k in ("divisie", "league", "cup", "serie", "liga", "bundesliga", "premier"))
+                or re.match(r"^\d{2}/\d{2}\s+\d{2}:\d{2}", l)
+            ):
+                continue
+            teams.append(l.replace("↗", "").strip())
+
+        if len(teams) >= 2:
+            event_name = f"{teams[0]} vs {teams[1]}"
+        else:
+            event_name = teams[0] if teams else f"GoldEdge Match {idx}"
+
+        if len(teams) >= 3:
+            selection = teams[2]
+        if len(teams) >= 4:
+            mt_raw = teams[3].split("·")[0].strip()
+            if mt_raw:
+                market_type = mt_raw.upper().replace(" ", "_")
+
+        date_str = now.strftime("%Y%m%d")
+        ev_hash = hashlib.md5(f"{event_name}_{date_str}".encode()).hexdigest()[:10]
+        stake = max(
+            10.0,
+            kelly_stake(
+                fair_prob,
+                offered_odds,
+                bankroll=self._settings.bankroll,
+                fraction=self._settings.kelly_fraction,
+                max_stake=self._settings.max_stake,
+            ),
+        )
+
+        return ValueSignal(
+            event_id=f"ge_{ev_hash}",
+            market_id=f"ge_m_{ev_hash}",
+            market_type=market_type,
+            selection=selection,
+            sport=sport,
+            fair_prob=round(fair_prob, 4),
+            confirm_prob=round(fair_prob, 4),
+            target_bookmaker="stoiximan",
+            target_odds=offered_odds,
+            edge=round(edge_val, 4),
+            recommended_stake=stake,
+            detected_at=now,
+            is_live=is_live,
+            event_name=event_name,
+            pinnacle_odds=sharp_odds,
+            betfair_odds=None,
+        )
 
     def _parse_row_text(self, text: str, idx: int, now: datetime, min_edge: float) -> ValueSignal | None:
         """Parse text of a GoldEdge valuebet row into a ValueSignal (supports legacy table format & test mocks)."""
@@ -301,7 +462,7 @@ class GoldEdgeSource:
                 except ValueError:
                     continue
 
-        if edge_val is None or edge_val < min_edge:
+        if edge_val is None or edge_val <= 0.0 or edge_val < min_edge:
             return None
 
         odds_candidates = []
@@ -320,6 +481,9 @@ class GoldEdgeSource:
 
         offered_odds = odds_candidates[0]
         sharp_odds = odds_candidates[1]
+        if offered_odds <= sharp_odds:
+            return None
+
         fair_prob = 1.0 / sharp_odds if sharp_odds > 1.0 else 0.5
         event_name = lines[0] if len(lines) > 0 else f"GoldEdge Match {idx}"
         selection = lines[1] if len(lines) > 1 else "Selection"
@@ -327,9 +491,12 @@ class GoldEdgeSource:
         stake = max(10.0, kelly_stake(fair_prob, offered_odds, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
         target_book = self._settings.placement_bookmaker or "stoiximan"
 
+        date_str = now.strftime("%Y%m%d")
+        ev_hash = hashlib.md5(f"{event_name}_{date_str}".encode()).hexdigest()[:10]
+
         return ValueSignal(
-            event_id=f"ge_{idx}_{int(now.timestamp())}",
-            market_id=f"ge_m_{idx}",
+            event_id=f"ge_{ev_hash}",
+            market_id=f"ge_m_{ev_hash}",
             market_type="MATCH_ODDS",
             selection=selection,
             sport=Sport.SOCCER,
@@ -343,7 +510,7 @@ class GoldEdgeSource:
             is_live=False,
             event_name=event_name,
             pinnacle_odds=sharp_odds,
-            betfair_odds=sharp_odds,
+            betfair_odds=None,
         )
 
 

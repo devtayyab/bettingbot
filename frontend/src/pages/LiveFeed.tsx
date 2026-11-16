@@ -608,7 +608,7 @@ export const LiveFeed: React.FC = () => {
             const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
             const betTypeInfo = getBetTypeBadge(s.bet_type, s.market_type, s.selection);
 
-            const bfOddsVal = s.betfair_odds ?? (s.fair_prob > 0 ? 1.0 / s.fair_prob : null);
+            const bfOddsVal = s.betfair_odds ?? null;
             const pinOddsVal = s.pinnacle_odds ?? (s.confirm_prob && s.confirm_prob > 0 ? 1.0 / s.confirm_prob : null);
 
             return (

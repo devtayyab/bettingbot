@@ -24,7 +24,7 @@ from typing import Any
 
 
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 
 from sqlalchemy.orm import Session
 
@@ -503,6 +503,15 @@ def save_signal(
     """
 
     event_id = _safe_event_id(sig.event_id)
+
+    if sig.edge is None or sig.edge <= 0.0:
+        log.debug(
+            "signal_rejected_non_positive_edge",
+            event_id=event_id,
+            selection=sig.selection,
+            edge=sig.edge,
+        )
+        return None
 
     delta_threshold = (
 
@@ -1077,6 +1086,133 @@ def get_event_exposure(session: Session, event_id: int) -> float:
     return sum(stakes) if stakes else 0.0
 
 
+def _market_family(market_type: str | None, selection: str | None) -> str:
+    mt = (market_type or "").lower()
+    sel = (selection or "").lower().strip()
+    if "total" in mt or sel.startswith(("over ", "under ")):
+        return "totals"
+    if "btts" in mt or "both teams" in mt:
+        return "btts"
+    if "handicap" in mt or "spread" in mt or "asian" in mt:
+        return "handicap"
+    if "draw_no_bet" in mt or "dnb" in mt:
+        return "dnb"
+    if "double_chance" in mt or " or draw" in sel or "draw or " in sel:
+        return "double_chance"
+    if any(k in mt for k in ("h2h", "1x2", "match_odds", "winner", "moneyline")):
+        return "1x2"
+    return mt or "unknown"
+
+
+def _match_outcome_side(selection: str, event_name: str | None) -> str | None:
+    sel = re.sub(r"\s*\([+-]?\d+(?:\.\d+)?\)\s*$", "", selection.strip().lower()).strip()
+    if sel in ("draw", "tie", "x"):
+        return "draw"
+
+    home = ""
+    away = ""
+    if event_name:
+        parts = re.split(r"\s+vs\.?\s+|\s+v\s+", event_name.strip().lower(), maxsplit=1)
+        if len(parts) == 2:
+            home, away = parts[0].strip(), parts[1].strip()
+
+    if "or draw" in sel or "draw or" in sel:
+        if home and home in sel:
+            return "home_or_draw"
+        if away and away in sel:
+            return "away_or_draw"
+    if sel == "1x":
+        return "home_or_draw"
+    if sel == "x2":
+        return "away_or_draw"
+    if sel == "12" or (home and away and home in sel and away in sel and " or " in sel):
+        return "home_or_away"
+    if sel in ("home", "1") or (home and (sel == home or (home in sel and (not away or away not in sel)))):
+        return "home"
+    if sel in ("away", "2") or (away and (sel == away or (away in sel and (not home or home not in sel)))):
+        return "away"
+    return None
+
+
+def check_match_bet_conflict(
+    session: Session,
+    sig: Signal,
+    *,
+    dry_run: bool | None = None,
+) -> str | None:
+    """Return 'duplicate_bet' or 'opposite_bet_conflict' if sig conflicts with an existing bet on the same match."""
+    match_cond = Signal.event_id == sig.event_id
+    if sig.event_name and sig.event_name.strip():
+        match_cond = or_(
+            Signal.event_id == sig.event_id,
+            func.lower(Signal.event_name) == sig.event_name.strip().lower(),
+        )
+
+    stmt = (
+        select(Bet, Signal)
+        .join(Signal, Bet.signal_id == Signal.id)
+        .where(match_cond)
+        .where(Bet.outcome.in_(("pending", "won", "lost")))
+    )
+    if dry_run is not None:
+        stmt = stmt.where(Bet.dry_run.is_(dry_run))
+
+    existing_rows = session.execute(stmt).all()
+    if not existing_rows:
+        return None
+
+    cand_sel = (sig.selection or "").strip().lower()
+    cand_fam = _market_family(sig.market_type, sig.selection)
+
+    opposite_side_pairs = {
+        ("home", "away"),
+        ("away", "home"),
+        ("home", "draw"),
+        ("draw", "home"),
+        ("away", "draw"),
+        ("draw", "away"),
+        ("home", "away_or_draw"),
+        ("away_or_draw", "home"),
+        ("away", "home_or_draw"),
+        ("home_or_draw", "away"),
+        ("draw", "home_or_away"),
+        ("home_or_away", "draw"),
+        ("home_or_draw", "away_or_draw"),
+        ("away_or_draw", "home_or_draw"),
+    }
+
+    for ex_bet, ex_sig in existing_rows:
+        ex_sel = (ex_bet.selection or ex_sig.selection or "").strip().lower()
+        ex_fam = _market_family(ex_sig.market_type, ex_sel)
+
+        # 1. Exact duplicate bet (same selection in same market family)
+        if cand_sel == ex_sel and (cand_fam == ex_fam or (sig.market_type or "").lower() == (ex_sig.market_type or "").lower()):
+            return "duplicate_bet"
+
+        # 2. Opposite Totals (Over vs Under)
+        if cand_fam == "totals" and ex_fam == "totals":
+            if (cand_sel.startswith("over") and ex_sel.startswith("under")) or (
+                cand_sel.startswith("under") and ex_sel.startswith("over")
+            ):
+                return "opposite_bet_conflict"
+
+        # 3. Opposite BTTS (Yes vs No)
+        if cand_fam == "btts" and ex_fam == "btts":
+            if ("yes" in cand_sel and "no" in ex_sel) or ("no" in cand_sel and "yes" in ex_sel):
+                return "opposite_bet_conflict"
+
+        # 4. Opposite Match Outcome / Handicap / DNB / Double Chance
+        match_fams = {"1x2", "dnb", "double_chance", "handicap"}
+        if cand_fam in match_fams and ex_fam in match_fams:
+            ev_name = sig.event_name or ex_sig.event_name
+            cand_side = _match_outcome_side(cand_sel, ev_name)
+            ex_side = _match_outcome_side(ex_sel, ev_name)
+            if cand_side and ex_side and (cand_side, ex_side) in opposite_side_pairs:
+                return "opposite_bet_conflict"
+
+    return None
+
+
 
 
 
@@ -1582,15 +1718,7 @@ def generate_report(
 
 
 
-        bf_odds = (
-
-            sig.betfair_odds
-
-            if getattr(sig, "betfair_odds", None) is not None
-
-            else (round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None)
-
-        )
+        bf_odds = sig.betfair_odds if getattr(sig, "betfair_odds", None) is not None else None
 
         pin_odds = (
 

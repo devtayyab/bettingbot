@@ -258,11 +258,7 @@ class OddsApiKeyIn(BaseModel):
 
 
 def _to_out(s: Signal) -> SignalOut:
-    bf_odds = (
-        s.betfair_odds
-        if getattr(s, "betfair_odds", None) is not None
-        else (round(1.0 / s.fair_prob, 2) if s.fair_prob and s.fair_prob > 0 else None)
-    )
+    bf_odds = s.betfair_odds if getattr(s, "betfair_odds", None) is not None else None
     pin_odds = (
         s.pinnacle_odds
         if getattr(s, "pinnacle_odds", None) is not None
@@ -1106,11 +1102,15 @@ def get_results(
             else:
                 profit_pct = 0.0
 
-            bf_odds = round(1.0 / sig.fair_prob, 2) if sig.fair_prob and sig.fair_prob > 0 else None
+            bf_odds = sig.betfair_odds if getattr(sig, "betfair_odds", None) is not None else None
             pin_odds = (
-                round(1.0 / sig.confirm_prob, 2)
-                if sig.confirm_prob and sig.confirm_prob > 0
-                else None
+                sig.pinnacle_odds
+                if getattr(sig, "pinnacle_odds", None) is not None
+                else (
+                    round(1.0 / sig.confirm_prob, 2)
+                    if sig.confirm_prob and sig.confirm_prob > 0
+                    else None
+                )
             )
             btype = classify_bet_type(sig.market_type, bet.selection)
 

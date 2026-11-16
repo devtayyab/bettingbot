@@ -6,7 +6,13 @@ import atexit
 import threading
 
 from ..config import get_settings
-from ..db.repository import get_event_exposure, open_signals, record_bet, save_limit_event
+from ..db.repository import (
+    check_match_bet_conflict,
+    get_event_exposure,
+    open_signals,
+    record_bet,
+    save_limit_event,
+)
 from ..db.session import session_scope
 from ..logging import get_logger
 from ..notifier import Notifier
@@ -88,6 +94,27 @@ class Executor:
                      status=target_status, dry_run=s.placement_dry_run)
 
             for sig in signals:
+                # 0. Strictly positive value check (never play negative or zero edge)
+                if sig.edge is None or sig.edge <= 0.0:
+                    log.info("execution_skipped_non_positive_edge", selection=sig.selection, edge=sig.edge)
+                    sig.status = "rejected"
+                    tally("skipped_negative_edge")
+                    continue
+
+                # 0b. Per-match duplicate & opposite bet prevention
+                conflict = check_match_bet_conflict(session, sig, dry_run=s.placement_dry_run)
+                if conflict is not None:
+                    log.info(
+                        "execution_skipped_bet_conflict",
+                        reason=conflict,
+                        selection=sig.selection,
+                        event_name=sig.event_name,
+                        event_id=sig.event_id,
+                    )
+                    sig.status = "rejected"
+                    tally(conflict)
+                    continue
+
                 # 1. Correlated Bets Grouping / Over-exposure check
                 current_exposure = get_event_exposure(session, sig.event_id)
                 available_exposure = s.max_event_exposure - current_exposure
