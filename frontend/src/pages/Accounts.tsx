@@ -26,6 +26,7 @@ interface ActivityBet {
   selection: string;
   sport: string;
   market_type: string;
+  bet_type?: string | null;
   is_live: boolean;
   edge: number;
   allocated_stake: number;
@@ -418,20 +419,20 @@ export const Accounts: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div style={{ overflowX: 'auto' }}>
+                  <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>Selection / Fixture</th>
+                          <th>Match Fixture &amp; Actual Bet</th>
                           <th>Sport</th>
                           <th>Type</th>
                           <th>Edge</th>
                           <th>Allocated Stake</th>
                           <th>Odds</th>
+                          <th>Final Score</th>
                           <th>Outcome</th>
                           <th>P/L Share</th>
-                          <th>Identified</th>
-                          <th>Placed</th>
+                          <th>Kickoff / Placed</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -439,17 +440,46 @@ export const Accounts: React.FC = () => {
                           const isWon = b.outcome === 'won';
                           const isLost = b.outcome === 'lost';
                           const isPending = b.outcome === 'pending';
+                          const sel = (b.selection || '').trim();
+                          const selLower = sel.toLowerCase();
+                          const ev = (b.event_name || '').trim();
+
+                          // Determine actual bet label
+                          let betLabel = sel;
+                          if (selLower === 'draw' || selLower === 'x' || selLower === 'tie') {
+                            betLabel = 'Draw (Tie)';
+                          } else if (selLower.startsWith('over') || selLower.startsWith('under')) {
+                            betLabel = sel.includes('Goals') ? sel : `${sel} Goals`;
+                          } else if (ev.includes(' vs ')) {
+                            const [home, away] = ev.split(' vs ');
+                            if (home && (selLower === home.trim().toLowerCase() || home.toLowerCase().includes(selLower))) {
+                              betLabel = `${sel} (Home Win)`;
+                            } else if (away && (selLower === away.trim().toLowerCase() || away.toLowerCase().includes(selLower))) {
+                              betLabel = `${sel} (Away Win)`;
+                            } else {
+                              betLabel = `${sel} (To Win)`;
+                            }
+                          }
+
                           return (
                             <tr key={b.signal_id || i}>
-                              <td style={{ maxWidth: '240px' }}>
-                                <div style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {b.selection}
+                              <td style={{ minWidth: '220px', maxWidth: '340px' }}>
+                                {/* Match Fixture */}
+                                <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '3px', fontSize: '0.88rem', lineHeight: '1.3' }}>
+                                  {ev ? `🏟 ${ev}` : `Match #${b.signal_id}`}
                                 </div>
-                                {b.event_name && (
-                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    🏟 {b.event_name}
-                                  </div>
-                                )}
+
+                                {/* Actual Bet Selection */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 600, color: '#38bdf8', fontSize: '0.82rem' }}>
+                                    🎯 Bet: {betLabel}
+                                  </span>
+                                  {b.bet_type && (
+                                    <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.14)', color: '#a5b4fc', fontSize: '0.65rem' }}>
+                                      {b.bet_type}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td style={{ color: 'var(--text-secondary)' }}>{b.sport}</td>
                               <td>
@@ -465,6 +495,27 @@ export const Accounts: React.FC = () => {
                               </td>
                               <td style={{ fontWeight: 600 }}>€{b.allocated_stake.toFixed(2)}</td>
                               <td style={{ fontWeight: 600 }}>{b.placed_odds?.toFixed(2) ?? '—'}</td>
+                              <td>
+                                {b.final_score ? (
+                                  <span style={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 700,
+                                    fontSize: '0.88rem',
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
+                                    background: 'rgba(255,255,255,0.07)',
+                                    border: '1px solid rgba(255,255,255,0.14)',
+                                    color: '#fff',
+                                    whiteSpace: 'nowrap',
+                                  }}>
+                                    {b.final_score}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                                    {isPending ? 'In-Play' : '—'}
+                                  </span>
+                                )}
+                              </td>
                               <td>
                                 <span
                                   className="pill"
@@ -488,11 +539,13 @@ export const Accounts: React.FC = () => {
                               <td style={{ fontWeight: 700 }} className={b.profit_share > 0 ? 'positive' : b.profit_share < 0 ? 'negative' : ''}>
                                 {b.profit_share > 0 ? `+€${b.profit_share.toFixed(2)}` : b.profit_share < 0 ? `-€${Math.abs(b.profit_share).toFixed(2)}` : '€0.00'}
                               </td>
-                              <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                {b.identified_at ? new Date(b.identified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
-                              </td>
-                              <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                {b.placed_at ? new Date(b.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                              <td>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-primary)' }}>
+                                  {b.placed_at ? new Date(b.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                  {b.identified_at ? new Date(b.identified_at).toLocaleDateString() : ''}
+                                </div>
                               </td>
                             </tr>
                           );

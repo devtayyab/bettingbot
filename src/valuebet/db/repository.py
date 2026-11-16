@@ -1280,6 +1280,8 @@ def get_account_activity(session: Session, account_id: int) -> dict:
 
                 "market_type": signal.market_type,
 
+                "bet_type": classify_bet_type(signal.market_type, signal.selection),
+
                 "is_live": signal.is_live,
 
                 "edge": round(signal.edge, 4),
