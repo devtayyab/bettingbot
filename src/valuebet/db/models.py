@@ -124,6 +124,11 @@ class Signal(Base):
     # All selections' odds serialised as JSON (e.g. {"Iceland": 1.29, "Draw": 5.40, "Estonia": 11.50})
     all_market_odds_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Book the price was read from / the bet is routed to.
+    target_bookmaker: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Source page of the signal (e.g. the GoldEdge match page) for settlement.
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     status: Mapped[str] = mapped_column(String(16), default="detected", index=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True

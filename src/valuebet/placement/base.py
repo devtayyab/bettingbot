@@ -31,6 +31,9 @@ class PlacementRequest:
     stake: float
     # Reject if the live price has dropped below this (odds moved against us).
     min_odds: float
+    # "Home vs Away". Needed to find the fixture on the bookmaker's site: the
+    # selection alone ("Draw", "Over 2.5") does not identify a match.
+    event_name: str | None = None
 
 
 @dataclass

@@ -23,12 +23,21 @@ class WalletManager(Protocol):
 class MockWalletManager:
     """A dummy wallet manager that starts with a set balance and logs deductions."""
     
-    def __init__(self, initial_balances: dict[str, float] | None = None) -> None:
-        self.balances: dict[str, float] = initial_balances or {
-            "stoiximan": 500.0,
-            "bet365": 500.0,
-            "pinnacle": 1000.0
-        }
+    def __init__(
+        self,
+        initial_balances: dict[str, float] | None = None,
+        default_balance: float | None = None,
+    ) -> None:
+        # Balance used for any bookmaker not listed explicitly. The engine passes
+        # the configured BANKROLL here so Kelly sizing follows the operator's
+        # setting instead of a hardcoded figure.
+        self.default_balance = default_balance
+        if initial_balances is not None:
+            self.balances: dict[str, float] = initial_balances
+        elif default_balance is not None:
+            self.balances = {}
+        else:
+            self.balances = {"stoiximan": 500.0, "bet365": 500.0, "pinnacle": 1000.0}
         # Kelly sizing is driven by these numbers, so a hardcoded balance means
         # stakes are computed against a bankroll the account may not have. Warn
         # once per process: a ValueEngine (and so a wallet) is built per sport per
@@ -43,7 +52,7 @@ class MockWalletManager:
             )
 
     def get_balance(self, bookmaker: str) -> float:
-        balance = self.balances.get(bookmaker, 0.0)
+        balance = self.balances.get(bookmaker, self.default_balance or 0.0)
         log.debug("wallet_balance_fetched", bookmaker=bookmaker, balance=balance)
         return balance
         

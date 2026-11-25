@@ -24,7 +24,7 @@ from typing import Any
 
 
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 
 from sqlalchemy.orm import Session
 
@@ -583,6 +583,11 @@ def save_signal(
 
                 prev.event_name = sig.event_name
 
+            if sig.source_url:
+                prev.source_url = sig.source_url
+            if sig.target_bookmaker:
+                prev.target_bookmaker = sig.target_bookmaker
+
             _populate_signal_market_odds(prev, sig.all_market_odds)
 
             session.flush()
@@ -664,7 +669,8 @@ def save_signal(
         event_start_time=sig.event_start_time,
 
         variables_complete=True,
-
+        target_bookmaker=sig.target_bookmaker,
+        source_url=sig.source_url,
     )
 
     _populate_signal_market_odds(row, sig.all_market_odds)
@@ -719,6 +725,24 @@ def open_signals(session: Session, status: str | None = None, limit: int | None 
         stmt = stmt.limit(limit)
     return list(session.scalars(stmt))
 
+
+
+
+
+def claim_signal(session: Session, signal_id: int, from_status: str) -> bool:
+    """Atomically move a signal from `from_status` to 'placing' and commit.
+
+    Returns False when another worker (the scheduler's executor, or a manual
+    Place click) got there first. The commit is what makes the claim visible to
+    the other process before any browser work starts.
+    """
+    result = session.execute(
+        update(Signal)
+        .where(Signal.id == signal_id, Signal.status == from_status)
+        .values(status="placing")
+    )
+    session.commit()
+    return bool(getattr(result, "rowcount", 0))
 
 
 
@@ -1008,7 +1032,6 @@ def pnl_summary(session: Session) -> dict:
     from ..config import get_settings
 
     s = get_settings()
-    is_paper_mode = getattr(s, "placement_dry_run", True) or getattr(s, "dry_run", True)
 
     all_bets = list(session.scalars(select(Bet)))
 
@@ -1016,8 +1039,15 @@ def pnl_summary(session: Session) -> dict:
 
     paper_bets = [b for b in all_bets if b.dry_run]
 
-    # If in Paper Mode or if no real bets exist, show paper portfolio metrics
-    bets = paper_bets if (is_paper_mode or not real_bets) else real_bets
+    # Headline figures are real money only. Paper bets are reported under their
+    # own paper_* keys so a simulation can never be read as realised profit.
+    bets = real_bets
+
+    paper_settled = [
+        b for b in paper_bets if b.outcome in {"won", "lost", "void"} and b.profit is not None
+    ]
+    paper_realised = sum((b.profit or 0.0) for b in paper_settled)
+    paper_staked = sum((b.stake or 0.0) for b in paper_settled)
 
     settled = [b for b in bets if b.outcome in {"won", "lost", "void"} and b.profit is not None]
 
@@ -1052,6 +1082,10 @@ def pnl_summary(session: Session) -> dict:
         "open_exposure": round(open_exposure, 2),
 
         "paper_bets": len(paper_bets),
+        "paper_bets_settled": len(paper_settled),
+        "paper_realised_pnl": round(paper_realised, 2),
+        "paper_roi": round(paper_realised / paper_staked, 4) if paper_staked else 0.0,
+        "dry_run": bool(s.placement_dry_run),
 
         "paper_exposure": round(sum(b.stake for b in paper_bets if b.outcome == "pending"), 2),
 
@@ -1163,6 +1197,7 @@ def check_match_bet_conflict(
 
     cand_sel = (sig.selection or "").strip().lower()
     cand_fam = _market_family(sig.market_type, sig.selection)
+    allow_opposite = get_settings().allow_opposite_bets
 
     opposite_side_pairs = {
         ("home", "away"),
@@ -1188,6 +1223,11 @@ def check_match_bet_conflict(
         # 1. Exact duplicate bet (same selection in same market family)
         if cand_sel == ex_sel and (cand_fam == ex_fam or (sig.market_type or "").lower() == (ex_sig.market_type or "").lower()):
             return "duplicate_bet"
+
+        if allow_opposite:
+            # Backing the other side of a match we already hold is permitted;
+            # only an exact repeat of the same bet is refused.
+            continue
 
         # 2. Opposite Totals (Over vs Under)
         if cand_fam == "totals" and ex_fam == "totals":
@@ -2154,13 +2194,84 @@ def settle_pending_bets(session: Session, *, force_check_all: bool = False) -> i
     if not eligible_pairs:
         return 0
 
-    # Step 2: Query official scores via ESPN (free) and The Odds API (if available)
+    def _apply_official(bet: Bet, sig: Signal, event: dict, source_label: str) -> bool:
+        home_team = event.get("home_team", "")
+        away_team = event.get("away_team", "")
+        scores_list = event.get("scores", [])
+        outcome = odds_resolver.determine_match_outcome(
+            selection=bet.selection,
+            home_team=home_team,
+            away_team=away_team,
+            scores=scores_list,
+            market_type=sig.market_type,
+        )
+        if outcome not in (BetOutcome.WON, BetOutcome.LOST, BetOutcome.VOID):
+            return False
+        bet.outcome = outcome.value
+        if outcome == BetOutcome.WON:
+            bet.profit = round(bet.stake * (bet.placed_odds - 1), 2)
+        elif outcome == BetOutcome.LOST:
+            bet.profit = -bet.stake
+        else:
+            bet.profit = 0.0
+        score_text = odds_resolver.format_score(home_team, away_team, scores_list)
+        bet.final_score = score_text
+        bet.settled_at = now
+        if not sig.event_name and home_team and away_team:
+            sig.event_name = f"{home_team} vs {away_team}"
+        sig.status = "settled"
+        clean_note = bet.note or ""
+        bet.note = (
+            f"settled_at:{now_iso} auto_settled_by:{source_label} "
+            f"score:{score_text or 'N/A'} {clean_note}"
+        ).strip()[:510]
+        settled_bet_ids.add(bet.id)
+        log.info(
+            "bet_auto_settled_official",
+            bet_id=bet.id,
+            source=source_label,
+            event_name=sig.event_name,
+            selection=bet.selection,
+            score=score_text,
+            outcome=bet.outcome,
+            profit=bet.profit,
+        )
+        return True
+
+    odds_resolver = TheOddsAPIResultResolver()
+
+    # Step 2a: GoldEdge. A signal read from a GoldEdge match page is settled from
+    # that same page once it shows FINISHED. Match-winner bets only: the page's
+    # headline score is sets in tennis, so it cannot settle totals or handicaps.
+    ge_events: dict[str, tuple[str, str]] = {}
+    for _bet, sig in eligible_pairs:
+        url = getattr(sig, "source_url", None) or ""
+        if "goldedge.net/odds/" not in url or _market_family(sig.market_type, sig.selection) != "1x2":
+            continue
+        parts = re.split(r"\s+vs\.?\s+", sig.event_name or "", maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) == 2:
+            ge_events[url] = (parts[0].strip(), parts[1].strip())
+    if ge_events:
+        try:
+            from ..sources.goldedge import fetch_goldedge_results
+
+            ge_results = fetch_goldedge_results(ge_events)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("goldedge_resolver_error", error=str(exc))
+            ge_results = {}
+        for bet, sig in eligible_pairs:
+            event = ge_results.get(getattr(sig, "source_url", None) or "")
+            if event is None or _market_family(sig.market_type, sig.selection) != "1x2":
+                continue
+            if _apply_official(bet, sig, event, "goldedge"):
+                settled_count += 1
+
+    # Step 2b: ESPN (free) and The Odds API (if available) for everything else
     bets_by_sport: dict[str, list[tuple[Bet, Signal]]] = {}
     for bet, sig in eligible_pairs:
         bets_by_sport.setdefault(sig.sport, []).append((bet, sig))
 
     espn_resolver = ESPNResultResolver()
-    odds_resolver = TheOddsAPIResultResolver()
 
     for sport_str, bet_pairs in bets_by_sport.items():
         official_events: list[dict] = []
@@ -2179,6 +2290,8 @@ def settle_pending_bets(session: Session, *, force_check_all: bool = False) -> i
             continue
 
         for bet, sig in bet_pairs:
+            if bet.id in settled_bet_ids:
+                continue
             matched_event = None
             sig_ev_name = infer_event_name(sig)
             sig_ev_norm = normalise(sig_ev_name) if sig_ev_name else None
@@ -2210,52 +2323,14 @@ def settle_pending_bets(session: Session, *, force_check_all: bool = False) -> i
             if not matched_event:
                 continue
 
-            home_team = matched_event.get("home_team", "")
-            away_team = matched_event.get("away_team", "")
-            scores_list = matched_event.get("scores", [])
-
-            outcome = odds_resolver.determine_match_outcome(
-                selection=bet.selection,
-                home_team=home_team,
-                away_team=away_team,
-                scores=scores_list,
-                market_type=sig.market_type,
-            )
-
-            if outcome in (BetOutcome.WON, BetOutcome.LOST, BetOutcome.VOID):
-                bet.outcome = outcome.value
-                if outcome == BetOutcome.WON:
-                    bet.profit = round(bet.stake * (bet.placed_odds - 1), 2)
-                elif outcome == BetOutcome.LOST:
-                    bet.profit = -bet.stake
-                else:
-                    bet.profit = 0.0
-
-                score_text = odds_resolver.format_score(home_team, away_team, scores_list)
-                bet.final_score = score_text
-                bet.settled_at = now
-                if not sig.event_name and home_team and away_team:
-                    sig.event_name = f"{home_team} vs {away_team}"
-
-                sig.status = "settled"
-                clean_note = bet.note or ""
-                source_label = "espn" if "espn" in str(matched_event.get("id", "")) else "the_odds_api"
-                bet.note = f"settled_at:{now_iso} auto_settled_by:{source_label} score:{score_text or 'N/A'} {clean_note}".strip()[:510]
+            source_label = "espn" if "espn" in str(matched_event.get("id", "")) else "the_odds_api"
+            if _apply_official(bet, sig, matched_event, source_label):
                 settled_count += 1
-                settled_bet_ids.add(bet.id)
-                log.info(
-                    "bet_auto_settled_official",
-                    bet_id=bet.id,
-                    event_name=sig.event_name,
-                    selection=bet.selection,
-                    score=score_text,
-                    outcome=bet.outcome,
-                    profit=bet.profit,
-                )
 
     # Step 3: For Paper Bets whose completed match had no external coverage,
     # deterministically simulate outcome using true fair probability.
-    for bet, sig in eligible_pairs:
+    simulate_paper = get_settings().paper_simulate_outcomes
+    for bet, sig in eligible_pairs if simulate_paper else []:
         if bet.id in settled_bet_ids:
             continue
         if not bet.dry_run:
@@ -2601,9 +2676,12 @@ def _safe_event_id(raw: str | int) -> int:
 
         return raw
 
-    digits = "".join(ch for ch in str(raw) if ch.isdigit())
-
-    if digits:
+    text_id = str(raw)
+    digits = "".join(ch for ch in text_id if ch.isdigit())
+    # GoldEdge ids are "ge_" + 10 hex chars. Keeping only their digits left as
+    # little as one digit, so unrelated matches shared an id and with it their
+    # exposure cap and duplicate checks. Hash the whole id instead.
+    if digits and not text_id.startswith("ge_"):
 
         return int(digits[:18])
 

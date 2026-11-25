@@ -1,10 +1,17 @@
-"""GoldEdge Integration and Scraper (https://www.goldedge.net/).
+"""GoldEdge integration (https://www.goldedge.net/).
 
-Allows importing value betting opportunities from GoldEdge:
-1. Scrapes live matches from https://www.goldedge.net/live
-2. Scrapes pre-match value opportunities from https://www.goldedge.net/
-3. Supports logged-in session cookies (if provided) for /valuebets/dashboard
-4. Normalizes into internal ValueSignal objects with mathematical edge against Pinnacle.
+Signals
+  GoldEdge's odds lists render one `a.ev-row` per match. Each price cell carries
+  the bookmaker and Pinnacle's no-vig fair price for that outcome in its title
+  ("Betano · fair 1.33"). A cell is value when the Betano/Stoiximan price is
+  above that fair price: edge = offered / fair - 1. Nothing is de-vigged here —
+  the row shows the best price per outcome from DIFFERENT bookmakers, so
+  de-vigging those three numbers together does not give a fair probability.
+  With saved session cookies the members' value-bet dashboard is read as well.
+
+Results
+  A finished match's page shows status FINISHED and the final score. Signals keep
+  the page URL (`source_url`) so their bets can be settled from it.
 """
 
 from __future__ import annotations
@@ -31,6 +38,19 @@ from ..placement.session_store import (
 log = get_logger("sources.goldedge")
 
 _BASE_URL = "https://www.goldedge.net"
+_DASHBOARD_URL = f"{_BASE_URL}/valuebets/dashboard"
+_LIST_PATHS = ("/", "/odds/football", "/odds/tennis", "/odds/basketball")
+# The sport pages only list the day's top ~20 matches. Each also links its main
+# competitions; this many of those are scanned per sync for wider coverage.
+_MAX_COMPETITION_PAGES = 10
+# Runs in the page: competition links such as /odds/football/england/premier-league.
+_COMPETITIONS_JS = """() => [...new Set([...document.querySelectorAll('a[href^="/odds/"]')]
+  .map(a => a.getAttribute('href'))
+  .filter(h => h.split('/').filter(Boolean).length === 4))]"""
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
 
 
 def get_goldedge_cookie_path(custom_path: str | Path | None = None) -> Path:
@@ -90,14 +110,212 @@ def interactive_login(
     return path, count
 
 
-def _devig_3way(o1: float, ox: float, o2: float) -> tuple[float, float, float]:
-    sum_inv = (1.0 / o1) + (1.0 / ox) + (1.0 / o2)
-    return (1.0 / o1) / sum_inv, (1.0 / ox) / sum_inv, (1.0 / o2) / sum_inv
+_SPORT_BY_PATH = {
+    "football": Sport.SOCCER,
+    "tennis": Sport.TENNIS,
+    "basketball": Sport.BASKETBALL,
+    "ice-hockey": Sport.ICE_HOCKEY,
+    "american-football": Sport.AMERICAN_FOOTBALL,
+    "baseball": Sport.BASEBALL,
+    "esports": Sport.ESPORTS,
+    "rugby-league": Sport.RUGBY_LEAGUE,
+}
+
+_TARGET_BOOK_RE = re.compile(r"betano|stoiximan", re.IGNORECASE)
+_FAIR_TITLE_RE = re.compile(r"fair\s+(\d+(?:\.\d+)?)", re.IGNORECASE)
+_SCORE_RE = re.compile(r"(\d+)\D+?(\d+)")
+
+# Runs in the page: one plain dict per match row.
+_ROWS_JS = """() => [...document.querySelectorAll('a.ev-row')].map(r => ({
+  href: r.getAttribute('href') || '',
+  start: r.querySelector('time') ? r.querySelector('time').getAttribute('datetime') : null,
+  live: !!r.querySelector('.ev-live, .ev-sc'),
+  teams: [...r.querySelectorAll('.ev-tn')].map(e => e.textContent.trim()),
+  cells: [...r.querySelectorAll('.ev-cell')].map(c => ({
+    title: c.getAttribute('title') || '',
+    odds: c.querySelector('.n') ? c.querySelector('.n').textContent.trim() : '',
+    book: c.querySelector('.ev-bk') ? c.querySelector('.ev-bk').textContent.trim() : '',
+  })),
+}))"""
+
+_RESULT_JS = """() => {
+  const st = document.querySelector('.evh-status');
+  const sc = document.querySelector('.evh-score');
+  return {
+    status_class: st ? st.className : '',
+    status_text: st ? st.textContent.trim() : '',
+    score_text: sc ? sc.innerText : '',
+  };
+}"""
 
 
-def _devig_2way(o1: float, o2: float) -> tuple[float, float]:
-    sum_inv = (1.0 / o1) + (1.0 / o2)
-    return (1.0 / o1) / sum_inv, (1.0 / o2) / sum_inv
+def _to_float(text: str | None) -> float | None:
+    try:
+        value = float(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 1.0 else None
+
+
+def event_id_from_href(href: str) -> str | None:
+    """'/odds/football/europe/champions-league/como-aek-athens-38czyxt' -> 'ge_como-aek-athens-38czyxt'."""
+    slug = href.rstrip("/").rsplit("/", 1)[-1]
+    return f"ge_{slug}" if slug else None
+
+
+def parse_event_row(
+    row: dict[str, Any],
+    *,
+    now: datetime,
+    min_edge: float,
+    stake_fn: Any,
+    target_bookmaker: str = "stoiximan",
+) -> list[ValueSignal]:
+    """Turn one GoldEdge match row into value signals for Betano/Stoiximan prices.
+
+    Only pre-match rows are used: in-play rows carry no fair price, so there is
+    nothing sound to measure an edge against.
+    """
+    href = row.get("href") or ""
+    parts = [seg for seg in href.split("/") if seg]
+    if len(parts) < 3 or parts[0] != "odds":
+        return []
+    sport = _SPORT_BY_PATH.get(parts[1])
+    teams = [t for t in (row.get("teams") or []) if t]
+    cells = row.get("cells") or []
+    if sport is None or len(teams) != 2 or row.get("live"):
+        return []
+    event_id = event_id_from_href(href)
+    if event_id is None:
+        return []
+
+    home, away = teams
+    if len(cells) == 3:
+        labels = [home, "Draw", away]
+    elif len(cells) == 2:
+        labels = [home, away]
+    else:
+        return []
+
+    start_time: datetime | None = None
+    if row.get("start"):
+        try:
+            start_time = datetime.fromisoformat(str(row["start"]).replace("Z", "+00:00"))
+        except ValueError:
+            start_time = None
+    if start_time is not None and start_time <= now:
+        return []  # already kicked off: the listed price is no longer pre-match
+
+    market_odds = {
+        label: odds
+        for label, cell in zip(labels, cells, strict=True)
+        if (odds := _to_float(cell.get("odds"))) is not None
+    }
+
+    signals: list[ValueSignal] = []
+    for label, cell in zip(labels, cells, strict=True):
+        title = cell.get("title") or ""
+        book = cell.get("book") or title
+        if not _TARGET_BOOK_RE.search(book):
+            continue
+        offered = _to_float(cell.get("odds"))
+        fair_match = _FAIR_TITLE_RE.search(title)
+        fair_odds = _to_float(fair_match.group(1)) if fair_match else None
+        if offered is None or fair_odds is None:
+            continue
+        edge = offered / fair_odds - 1.0
+        if edge <= 0.0 or edge < min_edge:
+            continue
+        fair_prob = 1.0 / fair_odds
+        stake = stake_fn(fair_prob, offered)
+        if stake <= 0:
+            continue
+        signals.append(
+            ValueSignal(
+                event_id=event_id,
+                market_id=f"{event_id}-h2h",
+                market_type="MATCH_ODDS",
+                selection=label,
+                sport=sport,
+                fair_prob=round(fair_prob, 4),
+                confirm_prob=round(fair_prob, 4),
+                target_bookmaker=target_bookmaker,
+                target_odds=offered,
+                edge=round(edge, 4),
+                recommended_stake=stake,
+                detected_at=now,
+                is_live=False,
+                event_start_time=start_time,
+                all_market_odds=market_odds or None,
+                event_name=f"{home} vs {away}",
+                pinnacle_odds=fair_odds,
+                betfair_odds=None,
+                source_url=f"{_BASE_URL}{href}",
+            )
+        )
+    return signals
+
+
+def parse_event_result(raw: dict[str, Any], home: str, away: str) -> dict[str, Any] | None:
+    """Final score from a GoldEdge event page, or None unless the match is FINISHED.
+
+    Returned in the same shape the other score resolvers use.
+    """
+    status = f"{raw.get('status_class', '')} {raw.get('status_text', '')}".lower()
+    if "finished" not in status:
+        return None
+    m = _SCORE_RE.search(raw.get("score_text") or "")
+    if not m or not home or not away:
+        return None
+    return {
+        "home_team": home,
+        "away_team": away,
+        "completed": True,
+        "scores": [
+            {"name": home, "score": m.group(1)},
+            {"name": away, "score": m.group(2)},
+        ],
+    }
+
+
+def fetch_goldedge_results(
+    events: dict[str, tuple[str, str]], *, headless: bool = True, limit: int = 30
+) -> dict[str, dict[str, Any]]:
+    """Read final scores for {event_url: (home, away)}. Unfinished matches are omitted."""
+    results: dict[str, dict[str, Any]] = {}
+    targets = [
+        (url, teams) for url, teams in events.items() if url.startswith(f"{_BASE_URL}/odds/")
+    ][:limit]
+    if not targets:
+        return results
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.error("playwright_missing", source="goldedge_results")
+        return results
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            page = browser.new_context(
+                viewport={"width": 1366, "height": 900}, user_agent=_USER_AGENT
+            ).new_page()
+            for url, (home, away) in targets:
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                    page.wait_for_timeout(1500)
+                    parsed = parse_event_result(page.evaluate(_RESULT_JS), home, away)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("goldedge_result_fetch_error", url=url, error=str(exc))
+                    continue
+                if parsed is not None:
+                    parsed["id"] = url
+                    results[url] = parsed
+            browser.close()
+    except Exception as exc:  # noqa: BLE001
+        log.error("goldedge_results_error", error=str(exc))
+    log.info("goldedge_results_fetched", requested=len(targets), finished=len(results))
+    return results
 
 
 class GoldEdgeSource:
@@ -110,194 +328,110 @@ class GoldEdgeSource:
         self.cookie_path = get_goldedge_cookie_path(cookie_path)
         self._settings = get_settings()
 
+    def _stake(self, fair_prob: float, odds: float) -> float:
+        """Fractional Kelly on the configured bankroll, capped at MAX_STAKE.
+
+        There used to be a 10-unit floor here, which staked 10 even when Kelly
+        asked for far less and ignored a MAX_STAKE below 10.
+        """
+        s = get_settings()
+        return kelly_stake(
+            fair_prob, odds, bankroll=s.bankroll, fraction=s.kelly_fraction, max_stake=s.max_stake
+        )
+
     def fetch_value_bets(self, min_edge: float | None = None) -> list[ValueSignal]:
-        """Scrape current value bets from GoldEdge live & pre-match feeds."""
+        """Scrape current pre-match value bets from GoldEdge."""
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
             log.error("playwright_missing", source="goldedge")
             return []
 
+        self._settings = get_settings()
         effective_min_edge = max(
             0.001,
-            min_edge if min_edge is not None else getattr(self._settings, "goldedge_min_edge", 0.015),
+            min_edge if min_edge is not None else self._settings.goldedge_min_edge,
         )
         signals: list[ValueSignal] = []
+        seen: set[tuple[str, str, str]] = set()
         now = datetime.now(UTC)
-        date_str = now.strftime("%Y%m%d")
 
-        urls_to_scan = [
-            (f"{_BASE_URL}/valuebets", False),
-            (f"{_BASE_URL}/live", True),
-            (f"{_BASE_URL}/", False),
-        ]
+        def add(sig: ValueSignal) -> None:
+            key = (sig.event_name or sig.event_id, sig.market_type, sig.selection)
+            if key not in seen:
+                seen.add(key)
+                signals.append(sig)
 
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=self.headless)
                 context = browser.new_context(
-                    viewport={"width": 1366, "height": 900},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    viewport={"width": 1366, "height": 900}, user_agent=_USER_AGENT
                 )
-
-                if self.cookie_path.exists():
+                has_cookies = self.cookie_path.exists()
+                if has_cookies:
                     load_cookies_into_context(context, self.cookie_path)
-
                 page = context.new_page()
 
-                # If cookies present, test if dashboard is accessible
-                if self.cookie_path.exists():
+                # Members' value-bet dashboard (needs a saved session).
+                if has_cookies:
                     try:
-                        page.goto(f"{_BASE_URL}/valuebets/dashboard", wait_until="domcontentloaded", timeout=15000)
-                        page.wait_for_timeout(2000)
-                        if "sign-in" not in page.url:
-                            urls_to_scan.insert(0, (f"{_BASE_URL}/valuebets/dashboard", False))
-                    except Exception:
-                        pass
-
-                for target_url, is_live in urls_to_scan:
-                    try:
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                        page.goto(_DASHBOARD_URL, wait_until="domcontentloaded", timeout=20000)
                         page.wait_for_timeout(2500)
-
-                        # On Open Value Bets pages, parse value-bet cards first
-                        if "/valuebets" in target_url:
-                            vb_cards = page.locator('[class*="card"], article, div:has-text("FAIR ODDS")').all()
-                            seen_vb_keys: set[str] = set()
-                            for idx, card in enumerate(vb_cards):
+                        if "sign-in" not in page.url and "/valuebets" in page.url:
+                            cards = page.locator(
+                                '[class*="card"], article, div:has-text("FAIR ODDS")'
+                            ).all()
+                            for idx, card in enumerate(cards):
                                 try:
                                     text = card.inner_text().strip()
-                                    if "FAIR ODDS" not in text and "EV" not in text:
-                                        continue
-                                    sig = self._parse_valuebet_card(text, idx=idx, now=now, min_edge=effective_min_edge, is_live=is_live)
-                                    if sig is not None:
-                                        dedup_key = f"{sig.event_name}|{sig.market_type}|{sig.selection}"
-                                        if dedup_key not in seen_vb_keys:
-                                            seen_vb_keys.add(dedup_key)
-                                            signals.append(sig)
-                                except Exception:
+                                except Exception:  # noqa: BLE001
                                     continue
-
-                        cards = page.locator('a[href*="/odds/"]').all()
-                        log.info("goldedge_scanned_elements", count=len(cards), url=target_url)
-
-                        for idx, card in enumerate(cards):
-                            try:
-                                text = card.inner_text().strip()
-                                lines = [l.strip() for l in text.splitlines() if l.strip()]
-                                if len(lines) < 6:
+                                if "FAIR ODDS" not in text:
                                     continue
+                                sig = self._parse_valuebet_card(
+                                    text, idx=idx, now=now, min_edge=effective_min_edge
+                                )
+                                if sig is not None:
+                                    add(sig)
+                        else:
+                            log.warning(
+                                "goldedge_session_invalid",
+                                msg="saved GoldEdge cookies did not open the dashboard; "
+                                    "re-run `valuebet login-goldedge`",
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("goldedge_dashboard_error", error=str(exc))
 
-                                full_text = " ".join(lines)
-                                if "🎾" in full_text or "Set " in full_text or "ATP" in full_text or "WTA" in full_text:
-                                    sport = Sport.TENNIS
-                                elif "🏀" in full_text or "NBA" in full_text or "Q1" in full_text or "Q2" in full_text:
-                                    sport = Sport.BASKETBALL
-                                else:
-                                    sport = Sport.SOCCER
-
-                                odds_pairs: list[tuple[float, str]] = []
-                                i = 0
-                                while i < len(lines) - 1:
-                                    if re.match(r"^\d+\.\d{1,2}$", lines[i]):
-                                        val = float(lines[i])
-                                        bookie = lines[i + 1]
-                                        if not re.match(r"^\d+$", bookie) and bookie not in ["·", "vs", "Odds"]:
-                                            odds_pairs.append((val, bookie))
-                                            i += 2
-                                            continue
-                                    i += 1
-
-                                home = lines[1]
-                                away = lines[3] if len(lines) > 3 and not lines[3].isdigit() else lines[2]
-                                if away.isdigit() and len(lines) > 4:
-                                    away = lines[4]
-                                event_name = f"{home} vs {away}"
-                                ev_hash = hashlib.md5(f"{event_name}_{date_str}".encode()).hexdigest()[:10]
-
-                                # 2-way match: require Betano/Stoiximan vs Pinnacle (or sharp reference)
-                                if len(odds_pairs) == 2:
-                                    (o1, b1), (o2, b2) = odds_pairs[0], odds_pairs[1]
-                                    p1_fair, p2_fair = _devig_2way(o1, o2)
-                                    pairs_to_check = []
-
-                                    if "Pinnacle" in b2 and ("betano" in b1.lower() or "stoiximan" in b1.lower()):
-                                        p1_est = max(0.02, 1.0 - (1.0 / o2 * 0.98))
-                                        e1 = (p1_est * o1) - 1.0
-                                        if e1 >= effective_min_edge and e1 > 0.0 and o1 > 1.0:
-                                            pairs_to_check.append((home, o1, b1, o2, p1_est, e1))
-                                    elif "Pinnacle" in b1 and ("betano" in b2.lower() or "stoiximan" in b2.lower()):
-                                        p2_est = max(0.02, 1.0 - (1.0 / o1 * 0.98))
-                                        e2 = (p2_est * o2) - 1.0
-                                        if e2 >= effective_min_edge and e2 > 0.0 and o2 > 1.0:
-                                            pairs_to_check.append((away, o2, b2, o1, p2_est, e2))
-
-                                    for sel, odds, bookie, sharp_o, p_f, edge_val in pairs_to_check:
-                                        stake = max(10.0, kelly_stake(p_f, odds, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
-                                        signals.append(
-                                            ValueSignal(
-                                                event_id=f"ge_{ev_hash}",
-                                                market_id=f"ge_m_{ev_hash}",
-                                                market_type="MATCH_ODDS",
-                                                selection=sel,
-                                                sport=sport,
-                                                fair_prob=round(p_f, 4),
-                                                confirm_prob=round(p_f, 4),
-                                                target_bookmaker="stoiximan",
-                                                target_odds=odds,
-                                                edge=round(edge_val, 4),
-                                                recommended_stake=stake,
-                                                detected_at=now,
-                                                is_live=is_live,
-                                                event_name=event_name,
-                                                pinnacle_odds=sharp_o,
-                                                betfair_odds=None,
-                                            )
-                                        )
-
-                                # 3-way match: only emit Betano/Stoiximan selections with strictly positive edge
-                                elif len(odds_pairs) == 3:
-                                    (o1, b1), (ox, bx), (o2, b2) = odds_pairs[0], odds_pairs[1], odds_pairs[2]
-                                    p1, px, p2 = _devig_3way(o1, ox, o2)
-
-                                    for sel, o, p_fair, bookie in [(home, o1, p1, b1), ("Draw", ox, px, bx), (away, o2, p2, b2)]:
-                                        b_lower = bookie.lower()
-                                        if "betano" not in b_lower and "stoiximan" not in b_lower:
-                                            continue
-                                        edge_val = (p_fair * o) - 1.0
-                                        if edge_val >= effective_min_edge and edge_val > 0.0:
-                                            stake = max(10.0, kelly_stake(p_fair, o, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
-                                            sharp_p = round(1.0 / p_fair, 2) if p_fair > 0 else o
-                                            if o <= sharp_p:
-                                                continue
-                                            signals.append(
-                                                ValueSignal(
-                                                    event_id=f"ge_{ev_hash}",
-                                                    market_id=f"ge_m_{ev_hash}",
-                                                    market_type="MATCH_ODDS",
-                                                    selection=sel,
-                                                    sport=sport,
-                                                    fair_prob=round(p_fair, 4),
-                                                    confirm_prob=round(p_fair, 4),
-                                                    target_bookmaker="stoiximan",
-                                                    target_odds=o,
-                                                    edge=round(edge_val, 4),
-                                                    recommended_stake=stake,
-                                                    detected_at=now,
-                                                    is_live=is_live,
-                                                    event_name=event_name,
-                                                    pinnacle_odds=sharp_p,
-                                                    betfair_odds=None,
-                                                )
-                                            )
-                            except Exception:
-                                continue
-                    except Exception as e:
-                        log.warning("goldedge_page_scan_error", url=target_url, error=str(e))
+                # Public odds lists: every row carries Pinnacle's fair price.
+                queue = list(_LIST_PATHS)
+                competitions: list[str] = []
+                while queue:
+                    path = queue.pop(0)
+                    try:
+                        page.goto(_BASE_URL + path, wait_until="domcontentloaded", timeout=25000)
+                        page.wait_for_timeout(2500)
+                        rows = page.evaluate(_ROWS_JS)
+                        if path == "/odds/football":
+                            competitions = page.evaluate(_COMPETITIONS_JS)[:_MAX_COMPETITION_PAGES]
+                            queue.extend(c for c in competitions if c not in _LIST_PATHS)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("goldedge_page_scan_error", path=path, error=str(exc))
                         continue
+                    found = 0
+                    for row in rows:
+                        for sig in parse_event_row(
+                            row,
+                            now=now,
+                            min_edge=effective_min_edge,
+                            stake_fn=self._stake,
+                        ):
+                            add(sig)
+                            found += 1
+                    log.info("goldedge_list_scanned", path=path, rows=len(rows), value_bets=found)
 
                 browser.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             log.error("goldedge_scrape_error", error=str(exc))
 
         log.info("goldedge_signals_extracted", count=len(signals))
@@ -416,16 +550,7 @@ class GoldEdgeSource:
 
         date_str = now.strftime("%Y%m%d")
         ev_hash = hashlib.md5(f"{event_name}_{date_str}".encode()).hexdigest()[:10]
-        stake = max(
-            10.0,
-            kelly_stake(
-                fair_prob,
-                offered_odds,
-                bankroll=self._settings.bankroll,
-                fraction=self._settings.kelly_fraction,
-                max_stake=self._settings.max_stake,
-            ),
-        )
+        stake = self._stake(fair_prob, offered_odds)
 
         return ValueSignal(
             event_id=f"ge_{ev_hash}",
@@ -488,7 +613,7 @@ class GoldEdgeSource:
         event_name = lines[0] if len(lines) > 0 else f"GoldEdge Match {idx}"
         selection = lines[1] if len(lines) > 1 else "Selection"
 
-        stake = max(10.0, kelly_stake(fair_prob, offered_odds, bankroll=self._settings.bankroll, fraction=self._settings.kelly_fraction, max_stake=self._settings.max_stake))
+        stake = self._stake(fair_prob, offered_odds)
         target_book = self._settings.placement_bookmaker or "stoiximan"
 
         date_str = now.strftime("%Y%m%d")

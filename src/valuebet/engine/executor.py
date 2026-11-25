@@ -8,6 +8,7 @@ import threading
 from ..config import get_settings
 from ..db.repository import (
     check_match_bet_conflict,
+    claim_signal,
     get_event_exposure,
     open_signals,
     record_bet,
@@ -21,6 +22,19 @@ from ..placement.bet365 import Bet365Placer
 from ..placement.stoiximan import StoiximanPlacer
 
 log = get_logger("executor")
+
+
+def min_acceptable_odds(sig, slippage: float = 0.02) -> float:
+    """Lowest live price still worth taking for this signal.
+
+    A flat 2% tolerance could give away the whole edge: a 2% edge bet taken 2%
+    lower is a break-even or losing bet. The floor is therefore the higher of the
+    slippage tolerance and the price that keeps at least half the detected edge.
+    """
+    floor = sig.target_odds * (1.0 - slippage)
+    if sig.fair_prob and sig.fair_prob > 0 and sig.edge and sig.edge > 0:
+        floor = max(floor, (1.0 + sig.edge / 2.0) / sig.fair_prob)
+    return round(max(min(floor, sig.target_odds), 1.01), 3)
 
 
 class PlacementRouter:
@@ -134,9 +148,8 @@ class Executor:
                     continue
 
                 # 2. Placement Request
-                # Price protection: we accept a slightly lower odds (e.g. 1 tick drop)
-                # but reject if it dropped too far below our edge threshold.
-                min_acceptable_odds = max(sig.target_odds * 0.98, 1.01)
+                # Price protection: accept a small drop, never one that eats the edge.
+                min_odds = min_acceptable_odds(sig)
 
                 req = PlacementRequest(
                     event_id=str(sig.event_id),
@@ -144,7 +157,8 @@ class Executor:
                     selection=sig.selection,
                     target_odds=sig.target_odds,
                     stake=stake,
-                    min_odds=min_acceptable_odds,
+                    min_odds=min_odds,
+                    event_name=sig.event_name,
                 )
 
                 # 3. Execute via Router
@@ -167,6 +181,13 @@ class Executor:
                     tally("no_placer")
                     continue
 
+                # Claim the signal (and commit) before touching the browser, so the
+                # API's manual Place and this loop can never both place it.
+                if not claim_signal(session, sig.id, target_status):
+                    log.info("execution_skipped_already_claimed", signal_id=sig.id)
+                    tally("already_claimed")
+                    continue
+
                 log.info("attempting_placement", selection=sig.selection, stake=stake, bookmaker=bookmaker_name)
                 # A single placer blowing up must not roll back the whole cycle and
                 # lose every other signal's status update.
@@ -176,6 +197,7 @@ class Executor:
                     log.error("placer_raised", bookmaker=bookmaker_name,
                               selection=sig.selection, error=str(exc))
                     sig.status = "failed"
+                    session.commit()
                     tally("placer_exception")
                     continue
 
@@ -191,6 +213,7 @@ class Executor:
                         dry_run=True, note=res.message,
                         bookmaker=bookmaker_name, verified=False,
                     )
+                    session.commit()
                     log.info("paper_bet_recorded", selection=sig.selection,
                              stake=res.accepted_stake)
                     tally("paper")
@@ -212,6 +235,9 @@ class Executor:
                         accepted_stake=res.accepted_stake,
                         was_rejected=False, note=res.message,
                     )
+                    # Commit now: money may be on, and a later failure in this
+                    # cycle must not roll the record of it back.
+                    session.commit()
                     if res.verified_on_platform:
                         placed_count += 1
                         tally("placed_verified")
@@ -240,6 +266,7 @@ class Executor:
                         requested_stake=res.requested_stake,
                         accepted_stake=0.0, was_rejected=True, note=res.message,
                     )
+                session.commit()
                 self.notifier.notify_bet_failed(sig.selection, res.message)
 
             log.info(

@@ -39,6 +39,10 @@ def ensure_schema_columns(db_engine=None) -> None:
                     conn.execute(text("ALTER TABLE signals ADD COLUMN betfair_odds FLOAT"))
                 if "pinnacle_odds" not in sig_cols:
                     conn.execute(text("ALTER TABLE signals ADD COLUMN pinnacle_odds FLOAT"))
+                if "target_bookmaker" not in sig_cols:
+                    conn.execute(text("ALTER TABLE signals ADD COLUMN target_bookmaker VARCHAR(32)"))
+                if "source_url" not in sig_cols:
+                    conn.execute(text("ALTER TABLE signals ADD COLUMN source_url VARCHAR(512)"))
             if "bets" in tables:
                 bet_cols = {c["name"] for c in insp.get_columns("bets")}
                 if "final_score" not in bet_cols:

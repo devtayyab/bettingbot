@@ -614,7 +614,7 @@ class StoiximanPlacer:
             step = "search_input"
             search_input_sel = "input[type='search'], [data-qa='search-input'], input[placeholder*='Search'], input[placeholder*='Αναζήτηση']"
             page.wait_for_selector(search_input_sel, timeout=5000)
-            page.fill(search_input_sel, request.selection)
+            page.fill(search_input_sel, self._search_term(request))
             time.sleep(1)
 
             step = "search_result"
@@ -630,19 +630,9 @@ class StoiximanPlacer:
             if self._click_selection_by_name(page, request.selection):
                 log.info("selection_clicked_by_name", selection=request.selection)
                 return
-            odds_str = f"{request.target_odds:.2f}".replace(".", ",")
-            log.warning(
-                "selection_click_by_odds_fallback",
-                selection=request.selection,
-                odds=odds_str,
-                msg="could not find the named outcome; falling back to matching the "
-                    "odds text, which may click the wrong selection",
-            )
-            step = "click_selection_by_odds"
-            page.click(
-                f"[data-qa='event-selection']:has-text('{odds_str}'), button:has-text('{odds_str}')",
-                timeout=5000,
-            )
+            # No fallback to clicking whatever button shows the expected odds:
+            # that text matches unrelated markets and stakes on the wrong outcome.
+            raise RuntimeError(f"outcome '{request.selection}' not found on the event page")
         except Exception as e:
             self._screenshot(page, "navigate_failed.png")
             log.error("navigate_to_selection_failed", error=str(e),
@@ -653,9 +643,25 @@ class StoiximanPlacer:
                 f"Failed to navigate to {request.selection} (step: {step})"
             ) from e
 
+    @staticmethod
+    def _search_term(request: PlacementRequest) -> str:
+        """What to type into the site search to reach this fixture.
+
+        Searching for the selection found nothing useful for "Draw" or
+        "Over 2.5". Use the home team from the event name; fall back to the
+        selection only when it is itself a team name.
+        """
+        event_name = (request.event_name or "").strip()
+        if event_name:
+            home = re.split(r"\s+vs\.?\s+|\s+v\s+", event_name, maxsplit=1, flags=re.IGNORECASE)[0]
+            if home.strip():
+                return home.strip()
+        return re.sub(r"\s*\([+-]?\d+(?:\.\d+)?\)\s*$", "", request.selection).strip()
+
     def _click_selection_by_name(self, page, selection: str) -> bool:
         """Click the outcome button whose label matches the selection name."""
-        name = selection.strip()
+        # Escape quotes: a name like "Nott'm Forest" otherwise breaks the selector.
+        name = selection.strip().replace("\\", "\\\\").replace("'", "\\'")
         for sel in [
             f"[data-qa='event-selection']:has-text('{name}')",
             f"[data-qa='selection']:has-text('{name}')",
@@ -753,6 +759,13 @@ class StoiximanPlacer:
             page.goto(_MY_BETS_URL, wait_until="domcontentloaded", timeout=20000)
             time.sleep(2)
             needle = request.selection.strip().lower()
+            # Require the fixture's teams in the same row when we know them, so an
+            # older open bet on the same selection is not taken for this one.
+            teams = [
+                t.strip().lower()
+                for t in re.split(r"\s+vs\.?\s+|\s+v\s+", request.event_name or "", flags=re.IGNORECASE)
+                if t.strip()
+            ]
             for sel in SELECTORS["open_bet_row"]:
                 try:
                     rows = page.query_selector_all(sel)
@@ -763,7 +776,7 @@ class StoiximanPlacer:
                         text = (row.text_content() or "").lower()
                     except Exception:
                         continue
-                    if needle and needle in text:
+                    if needle and needle in text and all(t in text for t in teams):
                         log.info("bet_verified_on_platform",
                                  selection=request.selection, odds=odds)
                         return True

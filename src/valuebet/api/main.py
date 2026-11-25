@@ -5,8 +5,11 @@ accounts management, reports, live config editing, and real-time SSE feed.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import re
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -31,6 +34,8 @@ from ..db.repository import (
     all_bookmaker_limit_summaries,
     bookmaker_limit_summary,
     cancel_signal,
+    check_match_bet_conflict,
+    claim_signal,
     classify_bet_type,
     create_account,
     delete_account_note,
@@ -39,6 +44,7 @@ from ..db.repository import (
     extract_final_score,
     extract_settled_at_iso,
     generate_report,
+    get_event_exposure,
     get_account,
     get_account_activity,
     infer_event_name,
@@ -120,6 +126,57 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ValueBet Pilot", version="0.2.0", lifespan=lifespan)
+
+
+def _basic_auth_ok(header: str | None, username: str, password: str) -> bool:
+    if not header or not header.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header[6:].strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    user, sep, pwd = decoded.partition(":")
+    if not sep:
+        return False
+    return secrets.compare_digest(user.encode(), username.encode()) and secrets.compare_digest(
+        pwd.encode(), password.encode()
+    )
+
+
+_AUTH_WARNED = False
+
+
+@app.middleware("http")
+async def require_dashboard_auth(request, call_next):
+    """HTTP Basic auth over the whole dashboard and API.
+
+    These endpoints can switch off dry-run, place bets and hand out the
+    bookmaker session cookies, so they must not be reachable anonymously.
+    Enforced whenever DASHBOARD_USERNAME and DASHBOARD_PASSWORD are set.
+    """
+    global _AUTH_WARNED
+    s = get_settings()
+    if not (s.dashboard_username and s.dashboard_password):
+        if not _AUTH_WARNED:
+            _AUTH_WARNED = True
+            log.warning(
+                "dashboard_auth_disabled",
+                msg="DASHBOARD_USERNAME/DASHBOARD_PASSWORD are not set: anyone who "
+                    "can reach this port can change settings and place bets",
+            )
+        return await call_next(request)
+    path = request.scope.get("path", "")
+    if path in ("/health", "/api/health"):
+        return await call_next(request)
+    if _basic_auth_ok(
+        request.headers.get("authorization"), s.dashboard_username, s.dashboard_password
+    ):
+        return await call_next(request)
+    return Response(
+        status_code=401,
+        content="authentication required",
+        headers={"WWW-Authenticate": 'Basic realm="ValueBet"'},
+    )
 
 
 @app.middleware("http")
@@ -221,6 +278,8 @@ class ConfigUpdateIn(BaseModel):
     max_event_exposure: float | None = None
     placement_dry_run: bool | None = None
     placement_require_approval: bool | None = None
+    allow_opposite_bets: bool | None = None
+    paper_simulate_outcomes: bool | None = None
     require_confirmation: bool | None = None
     enable_pinnacle_confirmation: bool | None = None
     require_score_sync: bool | None = None
@@ -322,7 +381,7 @@ def _to_out(s: Signal) -> SignalOut:
         event_start_time=s.event_start_time.isoformat() if s.event_start_time else None,
         betfair_odds=bf_odds,
         pinnacle_odds=pin_odds,
-        target_bookmaker="stoiximan",
+        target_bookmaker=getattr(s, "target_bookmaker", None) or "stoiximan",
         bet_type=btype,
         home_odds=h_odds,
         draw_odds=d_odds,
@@ -438,6 +497,8 @@ def get_config() -> dict:
         "poll_interval_prematch": s.poll_interval_prematch,
         "placement_dry_run": s.placement_dry_run,
         "placement_require_approval": s.placement_require_approval,
+        "allow_opposite_bets": s.allow_opposite_bets,
+        "paper_simulate_outcomes": s.paper_simulate_outcomes,
         "allow_demo_fallback": s.allow_demo_fallback,
         "placement_bookmaker": s.placement_bookmaker,
         "sport_overrides": s.sport_overrides,
@@ -884,17 +945,36 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
             raise HTTPException(404, "signal not found")
         if s.placement_require_approval and sig.status != "approved":
             raise HTTPException(409, "approval required before placement")
-        if sig.status in ("placed", "unconfirmed"):
-            raise HTTPException(409, f"signal is '{sig.status}', refusing to place again")
+        if sig.status not in ("detected", "approved"):
+            raise HTTPException(409, f"signal is '{sig.status}', refusing to place")
+        if sig.edge is None or sig.edge <= 0.0:
+            raise HTTPException(409, "signal has no positive edge")
 
-        min_odds = round(sig.target_odds * (1 - body.slippage), 2)
+        # The same guards the automatic executor applies, so a manual click
+        # cannot double a bet or exceed the per-match exposure cap.
+        conflict = check_match_bet_conflict(session, sig, dry_run=s.placement_dry_run)
+        if conflict is not None:
+            raise HTTPException(409, f"refused: {conflict} on this match")
+        available = s.max_event_exposure - get_event_exposure(session, sig.event_id)
+        stake = round(min(sig.recommended_stake, available), 2)
+        if stake < 0.50:
+            raise HTTPException(409, "per-match exposure cap reached")
+
+        from ..engine.executor import PlacementRouter, min_acceptable_odds
+        from ..placement.base import PlacementStatus
+
+        previous_status = sig.status
+        if not claim_signal(session, signal_id, previous_status):
+            raise HTTPException(409, "signal is already being placed")
+
+        min_odds = min_acceptable_odds(sig, slippage=body.slippage)
         log.info(
             "placement_requested",
             signal_id=signal_id,
             selection=sig.selection,
             target_odds=sig.target_odds,
             min_odds=min_odds,
-            stake=sig.recommended_stake,
+            stake=stake,
             dry_run=s.placement_dry_run,
         )
         request = PlacementRequest(
@@ -902,17 +982,24 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
             market_type=sig.market_type,
             selection=sig.selection,
             target_odds=sig.target_odds,
-            stake=sig.recommended_stake,
+            stake=stake,
             min_odds=min_odds,
+            event_name=sig.event_name,
         )
-        from ..engine.executor import PlacementRouter
-        from ..placement.base import PlacementStatus
 
         placer = PlacementRouter.shared().get_placer(s.placement_bookmaker)
         if placer is None:
             log.error("no_placer_configured", bookmaker=s.placement_bookmaker)
+            sig.status = previous_status
+            session.commit()
             raise HTTPException(501, f"no placer configured for '{s.placement_bookmaker}'")
-        result = placer.place(request)
+        try:
+            result = placer.place(request)
+        except Exception as exc:  # noqa: BLE001
+            log.error("placer_raised", signal_id=signal_id, error=str(exc))
+            sig.status = previous_status
+            session.commit()
+            raise HTTPException(502, f"placement failed: {exc}") from exc
         log.info(
             "placement_completed",
             signal_id=signal_id,
@@ -966,6 +1053,8 @@ def place_bet(signal_id: int, body: PlaceIn | None = None) -> dict:
                     was_rejected=True,
                     note=result.message,
                 )
+            # Nothing was staked: release the claim so the operator can retry.
+            sig.status = previous_status
             return payload(None)
 
         bet = record_bet(

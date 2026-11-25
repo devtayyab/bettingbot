@@ -146,3 +146,5 @@ class ValueSignal:
     # Raw bookmaker odds as observed in the sharp markets
     betfair_odds: float | None = None
     pinnacle_odds: float | None = None
+    # Page the signal was read from; lets the bet be settled from the same source.
+    source_url: str | None = None

@@ -208,7 +208,9 @@ class TheOddsAPISource:
         for sport_key in sport_keys:
             cache_key = f"{sport_key}:{regions_param}:{markets_param}"
             cached = _ODDS_CACHE.get(cache_key)
+            fetched_ts = time.time()
             if cached and (time.time() - cached[0]) < _ODDS_CACHE_TTL:
+                fetched_ts = cached[0]
                 events = cached[1]
                 remaining = cached[2]
                 used = cached[3]
@@ -268,6 +270,9 @@ class TheOddsAPISource:
                 except ValueError:
                     pass
 
+            # Stamp quotes with when this payload was actually fetched. Stamping a
+            # 3-minute-old cached payload as "now" made the stale-odds check a no-op.
+            quote_ts = datetime.fromtimestamp(fetched_ts, UTC)
             for ev in events:
                 event_id = ev.get("id", "")
                 home_team = ev.get("home_team", "Home")
@@ -330,7 +335,7 @@ class TheOddsAPISource:
                                     lay_odds=lay,
                                     back_liquidity=None,
                                     lay_liquidity=None,
-                                    captured_at=now,
+                                    captured_at=quote_ts,
                                 )
                             )
                         if len(quotes) >= 2:
@@ -374,7 +379,7 @@ class TheOddsAPISource:
                                     source=self.name,
                                     selection=sel_label,
                                     decimal_odds=back,
-                                    captured_at=now,
+                                    captured_at=quote_ts,
                                 )
                             )
                         for pt, t_quotes in by_point.items():
@@ -428,7 +433,7 @@ class TheOddsAPISource:
                                     source=self.name,
                                     selection=f"{t_name} ({_fmt_signed_line(t_pt)})",
                                     decimal_odds=t_price,
-                                    captured_at=now,
+                                    captured_at=quote_ts,
                                 )
                                 for t_name, t_price, t_pt in items
                             ]

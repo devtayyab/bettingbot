@@ -105,9 +105,12 @@ def _track_clv() -> None:
 def _sync_goldedge() -> None:
     """Automated periodic scan of GoldEdge scanner for value bets (zero API credits)."""
     _reload_env_if_changed()
+    s = get_settings()
+    if not s.goldedge_enabled:
+        return
     try:
         from ..sources.goldedge import sync_goldedge_to_db
-        count = sync_goldedge_to_db(min_edge=0.015)
+        count = sync_goldedge_to_db(min_edge=s.goldedge_min_edge)
         if count > 0:
             log.info("goldedge_auto_sync_complete", new_signals=count)
     except Exception as exc:

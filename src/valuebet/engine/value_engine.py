@@ -57,7 +57,7 @@ class ValueEngine:
         self.confirmation = confirmation
         self.targets = targets
         self.settings = settings or get_settings()
-        self.wallet = MockWalletManager()
+        self.wallet = MockWalletManager(default_balance=self.settings.bankroll)
         if self.settings.env == "dev":
             self.score_tracker = DummyScoreTracker()
         else:
@@ -413,7 +413,7 @@ class ValueEngine:
             if current_exposure >= s.max_event_exposure:
                 log.info("event_exposure_cap_reached", event_id=target.event_id,
                          current=current_exposure, cap=s.max_event_exposure)
-                return []  # Cap reached, skip all further selections for this event
+                return out  # Cap reached: keep what was found, skip the rest
 
             # Calculate fractional Kelly stake using dynamic bookmaker balance
             dynamic_bankroll = self.wallet.get_balance(tq.source)
