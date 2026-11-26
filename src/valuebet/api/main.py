@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import (
     get_settings,
@@ -280,6 +280,8 @@ class ConfigUpdateIn(BaseModel):
     placement_require_approval: bool | None = None
     allow_opposite_bets: bool | None = None
     paper_simulate_outcomes: bool | None = None
+    goldedge_enabled: bool | None = None
+    goldedge_min_edge: float | None = Field(default=None, ge=0.0, le=1.0)
     require_confirmation: bool | None = None
     enable_pinnacle_confirmation: bool | None = None
     require_score_sync: bool | None = None
@@ -499,6 +501,8 @@ def get_config() -> dict:
         "placement_require_approval": s.placement_require_approval,
         "allow_opposite_bets": s.allow_opposite_bets,
         "paper_simulate_outcomes": s.paper_simulate_outcomes,
+        "goldedge_enabled": s.goldedge_enabled,
+        "goldedge_min_edge": s.goldedge_min_edge,
         "allow_demo_fallback": s.allow_demo_fallback,
         "placement_bookmaker": s.placement_bookmaker,
         "sport_overrides": s.sport_overrides,

@@ -7,6 +7,10 @@ Signals
   above that fair price: edge = offered / fair - 1. Nothing is de-vigged here —
   the row shows the best price per outcome from DIFFERENT bookmakers, so
   de-vigging those three numbers together does not give a fair probability.
+  Because a row only names the best-priced bookmaker, Betano is usually hidden
+  behind someone paying more. So for every row whose best price beats fair by
+  the minimum edge, the match page is opened and Betano's own price is read
+  from its bookmaker table.
   With saved session cookies the members' value-bet dashboard is read as well.
 
 Results
@@ -47,6 +51,10 @@ _MAX_COMPETITION_PAGES = 10
 _COMPETITIONS_JS = """() => [...new Set([...document.querySelectorAll('a[href^="/odds/"]')]
   .map(a => a.getAttribute('href'))
   .filter(h => h.split('/').filter(Boolean).length === 4))]"""
+# Match pages opened per sync to read Betano's own price (best edges first).
+_MAX_EVENT_PAGES = 25
+# A bookmaker price older than this on the match page is not trusted.
+_MAX_PRICE_AGE_MINUTES = 30.0
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -138,6 +146,18 @@ _ROWS_JS = """() => [...document.querySelectorAll('a.ev-row')].map(r => ({
   })),
 }))"""
 
+# Runs in a match page: the per-bookmaker 1X2 / moneyline table.
+_BOOK_TABLE_JS = """() => {
+  const t = document.querySelector('table.ot');
+  if (!t) return [];
+  return [...t.querySelectorAll('tr')].filter(r => r.querySelector('td.ot-p')).map(r => ({
+    book: r.querySelector('.ot-bkn') ? r.querySelector('.ot-bkn').textContent.trim() : '',
+    age: r.querySelector('.ot-age') ? r.querySelector('.ot-age').textContent.trim() : '',
+    odds: [...r.querySelectorAll('td.ot-p')].map(
+      c => c.querySelector('.n') ? c.querySelector('.n').textContent.trim() : ''),
+  }));
+}"""
+
 _RESULT_JS = """() => {
   const st = document.querySelector('.evh-status');
   const sc = document.querySelector('.evh-score');
@@ -155,6 +175,68 @@ def _to_float(text: str | None) -> float | None:
     except (TypeError, ValueError):
         return None
     return value if value > 1.0 else None
+
+
+def _age_minutes(text: str | None) -> float | None:
+    """'45s' -> 0.75, '4m' -> 4, '2h' -> 120, '1d' -> 1440. None when unreadable."""
+    m = re.fullmatch(r"\s*(\d+)\s*([smhd])\s*", (text or "").lower())
+    if not m:
+        return None
+    return int(m.group(1)) * {"s": 1 / 60, "m": 1.0, "h": 60.0, "d": 1440.0}[m.group(2)]
+
+
+def best_price_edge(row: dict[str, Any]) -> float:
+    """Largest (best price / fair - 1) in a pre-match row; 0 for live or unpriced rows.
+
+    Betano never pays more than the row's best price, so this bounds Betano's edge.
+    """
+    if row.get("live"):
+        return 0.0
+    best = 0.0
+    for cell in row.get("cells") or []:
+        offered = _to_float(cell.get("odds"))
+        fair_match = _FAIR_TITLE_RE.search(cell.get("title") or "")
+        fair_odds = _to_float(fair_match.group(1)) if fair_match else None
+        if offered is not None and fair_odds is not None:
+            best = max(best, offered / fair_odds - 1.0)
+    return best
+
+
+def row_with_book_prices(
+    row: dict[str, Any], table: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The list row re-priced with Betano/Stoiximan's own odds from the match page.
+
+    The fair price stays the one GoldEdge published, unless Pinnacle's line on the
+    match page de-vigs to a higher fair price (the line moved) - then that is used,
+    so a stale fair price cannot invent an edge. None when Betano is not listed,
+    its price is stale, or the table does not line up with the row's outcomes.
+    """
+    cells = row.get("cells") or []
+    target = next((r for r in table if _TARGET_BOOK_RE.search(r.get("book") or "")), None)
+    if target is None or len(target.get("odds") or []) != len(cells):
+        return None
+    age = _age_minutes(target.get("age"))
+    if age is None or age > _MAX_PRICE_AGE_MINUTES:
+        return None
+
+    pin_fair: list[float | None] = [None] * len(cells)
+    pin = next((r for r in table if "pinnacle" in (r.get("book") or "").lower()), None)
+    if pin is not None and len(pin.get("odds") or []) == len(cells):
+        pin_odds = [_to_float(o) for o in pin["odds"]]
+        if all(o is not None for o in pin_odds):
+            overround = sum(1.0 / o for o in pin_odds)  # type: ignore[operator]
+            pin_fair = [round(o * overround, 2) for o in pin_odds]  # type: ignore[operator]
+
+    new_cells = []
+    for cell, price, pf in zip(cells, target["odds"], pin_fair, strict=True):
+        fair_match = _FAIR_TITLE_RE.search(cell.get("title") or "")
+        fair_odds = _to_float(fair_match.group(1)) if fair_match else None
+        if fair_odds is not None and pf is not None:
+            fair_odds = max(fair_odds, pf)
+        title = f"{target['book']} · fair {fair_odds}" if fair_odds is not None else ""
+        new_cells.append({"title": title, "odds": price, "book": target["book"]})
+    return {**row, "cells": new_cells}
 
 
 def event_id_from_href(href: str) -> str | None:
@@ -405,6 +487,7 @@ class GoldEdgeSource:
 
                 # Public odds lists: every row carries Pinnacle's fair price.
                 queue = list(_LIST_PATHS)
+                candidates: dict[str, tuple[float, dict[str, Any]]] = {}
                 competitions: list[str] = []
                 while queue:
                     path = queue.pop(0)
@@ -420,6 +503,10 @@ class GoldEdgeSource:
                         continue
                     found = 0
                     for row in rows:
+                        href = row.get("href") or ""
+                        edge_cap = best_price_edge(row)
+                        if href and edge_cap >= effective_min_edge:
+                            candidates[href] = (edge_cap, row)
                         for sig in parse_event_row(
                             row,
                             now=now,
@@ -429,6 +516,36 @@ class GoldEdgeSource:
                             add(sig)
                             found += 1
                     log.info("goldedge_list_scanned", path=path, rows=len(rows), value_bets=found)
+
+                # Match pages: Betano's own price where the best price shows value.
+                ranked = sorted(candidates.items(), key=lambda kv: -kv[1][0])
+                opened = from_pages = 0
+                for href, (_cap, row) in ranked[:_MAX_EVENT_PAGES]:
+                    try:
+                        page.goto(_BASE_URL + href, wait_until="domcontentloaded", timeout=25000)
+                        page.wait_for_timeout(1500)
+                        table = page.evaluate(_BOOK_TABLE_JS)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("goldedge_event_page_error", href=href, error=str(exc))
+                        continue
+                    opened += 1
+                    repriced = row_with_book_prices(row, table)
+                    if repriced is None:
+                        continue
+                    for sig in parse_event_row(
+                        repriced,
+                        now=now,
+                        min_edge=effective_min_edge,
+                        stake_fn=self._stake,
+                    ):
+                        add(sig)
+                        from_pages += 1
+                log.info(
+                    "goldedge_event_pages_scanned",
+                    candidates=len(candidates),
+                    opened=opened,
+                    value_bets=from_pages,
+                )
 
                 browser.close()
         except Exception as exc:  # noqa: BLE001
@@ -643,6 +760,12 @@ def sync_goldedge_to_db(min_edge: float | None = None) -> int:
     """Convenience function to fetch value bets from GoldEdge and save to DB."""
     source = GoldEdgeSource(headless=True)
     signals = source.fetch_value_bets(min_edge=min_edge)
+    # The configured odds range applies to GoldEdge signals like any other source.
+    settings = get_settings()
+    in_range = [s for s in signals if settings.min_odds <= s.target_odds <= settings.max_odds]
+    if len(in_range) != len(signals):
+        log.info("goldedge_odds_range_filtered", dropped=len(signals) - len(in_range))
+    signals = in_range
     persisted = 0
     with session_scope() as session:
         for sig in signals:

@@ -1,3 +1,4 @@
+import pytest
 """Tests for GoldEdge scraper and parser."""
 
 from datetime import UTC, datetime
@@ -347,3 +348,75 @@ def test_bets_settle_from_goldedge_result(monkeypatch):
         assert bets["AEK Athens"].outcome == "lost" and bets["AEK Athens"].profit == -5.0
         assert bets["Como"].final_score == "2 - 0"
         assert "auto_settled_by:goldedge" in bets["Como"].note
+
+
+# --- Betano's own price from the match page -------------------------------
+
+def _list_row():
+    return {
+        "href": "/odds/football/europe/champions-league/alpha-beta-abc1234",
+        "start": "2099-01-01T20:00:00Z",
+        "live": False,
+        "teams": ["Alpha", "Beta"],
+        "cells": [
+            {"title": "Bet365 · fair 2.00", "odds": "2.02", "book": "Bet365"},
+            {"title": "BetRivers · fair 3.60", "odds": "3.70", "book": "BetRivers"},
+            {"title": "Hard Rock Bet · fair 4.50", "odds": "4.95", "book": "Hard Rock Bet"},
+        ],
+    }
+
+
+def _book_table(betano_age="4m", betano=("1.95", "3.50", "4.70"), pin=("1.94", "3.50", "4.37")):
+    return [
+        {"book": "Pinnacle", "age": "4m", "odds": list(pin)},
+        {"book": "Bet365", "age": "4m", "odds": ["2.02", "3.40", "4.40"]},
+        {"book": "Betano", "age": betano_age, "odds": list(betano)},
+    ]
+
+
+def test_best_price_edge_bounds_the_row():
+    from valuebet.sources.goldedge import best_price_edge
+
+    assert best_price_edge(_list_row()) == pytest.approx(4.95 / 4.50 - 1)
+    assert best_price_edge({**_list_row(), "live": True}) == 0.0
+
+
+def test_match_page_reveals_betano_value_hidden_behind_a_better_price():
+    from datetime import UTC, datetime
+
+    from valuebet.sources.goldedge import parse_event_row, row_with_book_prices
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    kw = {"now": now, "min_edge": 0.02, "stake_fn": lambda p, o: 5.0}
+    # The list row names no Betano cell, so on its own it yields nothing.
+    assert parse_event_row(_list_row(), **kw) == []
+
+    repriced = row_with_book_prices(_list_row(), _book_table())
+    sigs = parse_event_row(repriced, **kw)
+    assert [s.selection for s in sigs] == ["Beta"]
+    assert sigs[0].target_odds == 4.70
+    assert sigs[0].edge == pytest.approx(4.70 / 4.50 - 1, abs=1e-4)
+    assert sigs[0].all_market_odds == {"Alpha": 1.95, "Draw": 3.50, "Beta": 4.70}
+
+
+def test_match_page_price_rejected_when_stale_missing_or_misaligned():
+    from valuebet.sources.goldedge import row_with_book_prices
+
+    assert row_with_book_prices(_list_row(), _book_table(betano_age="3h")) is None
+    assert row_with_book_prices(_list_row(), _book_table(betano_age="")) is None
+    assert row_with_book_prices(_list_row(), _book_table()[:2]) is None  # no Betano row
+    assert row_with_book_prices(_list_row(), _book_table(betano=("1.95", "4.70"))) is None
+
+
+def test_moved_pinnacle_line_raises_the_fair_price():
+    from datetime import UTC, datetime
+
+    from valuebet.sources.goldedge import parse_event_row, row_with_book_prices
+
+    # Pinnacle now pays 4.80 on Beta: its de-vigged fair price is above Betano's 4.70.
+    repriced = row_with_book_prices(_list_row(), _book_table(pin=("1.85", "3.45", "4.80")))
+    sigs = parse_event_row(
+        repriced, now=datetime(2026, 1, 1, tzinfo=UTC), min_edge=0.02, stake_fn=lambda p, o: 5.0
+    )
+    assert sigs == []
+
