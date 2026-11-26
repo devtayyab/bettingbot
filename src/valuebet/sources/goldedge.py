@@ -55,6 +55,9 @@ _COMPETITIONS_JS = """() => [...new Set([...document.querySelectorAll('a[href^="
 _MAX_EVENT_PAGES = 25
 # A bookmaker price older than this on the match page is not trusted.
 _MAX_PRICE_AGE_MINUTES = 30.0
+# What the most recent scan saw, so "0 value bets" can be told apart from
+# "the site served this machine nothing". Returned by POST /goldedge/sync.
+LAST_SCAN: dict[str, Any] = {}
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -437,6 +440,22 @@ class GoldEdgeSource:
         signals: list[ValueSignal] = []
         seen: set[tuple[str, str, str]] = set()
         now = datetime.now(UTC)
+        stats: dict[str, Any] = {
+            "scanned_at": now.isoformat(),
+            "min_edge": effective_min_edge,
+            "dashboard": "no cookies",
+            "pages_scanned": 0,
+            "matches_seen": 0,
+            "candidates": 0,
+            "match_pages_opened": 0,
+            "betano_listed": 0,
+            "signals": 0,
+            "empty_pages": [],
+            "errors": [],
+        }
+        LAST_SCAN.clear()
+        LAST_SCAN.update(stats)
+        stats = LAST_SCAN
 
         def add(sig: ValueSignal) -> None:
             key = (sig.event_name or sig.event_id, sig.market_type, sig.selection)
@@ -461,6 +480,7 @@ class GoldEdgeSource:
                         page.goto(_DASHBOARD_URL, wait_until="domcontentloaded", timeout=20000)
                         page.wait_for_timeout(2500)
                         if "sign-in" not in page.url and "/valuebets" in page.url:
+                            stats["dashboard"] = "open"
                             cards = page.locator(
                                 '[class*="card"], article, div:has-text("FAIR ODDS")'
                             ).all()
@@ -477,12 +497,14 @@ class GoldEdgeSource:
                                 if sig is not None:
                                     add(sig)
                         else:
+                            stats["dashboard"] = f"session rejected (landed on {page.url})"
                             log.warning(
                                 "goldedge_session_invalid",
                                 msg="saved GoldEdge cookies did not open the dashboard; "
                                     "re-run `valuebet login-goldedge`",
                             )
                     except Exception as exc:  # noqa: BLE001
+                        stats["dashboard"] = f"error: {str(exc)[:120]}"
                         log.warning("goldedge_dashboard_error", error=str(exc))
 
                 # Public odds lists: every row carries Pinnacle's fair price.
@@ -499,8 +521,18 @@ class GoldEdgeSource:
                             competitions = page.evaluate(_COMPETITIONS_JS)[:_MAX_COMPETITION_PAGES]
                             queue.extend(c for c in competitions if c not in _LIST_PATHS)
                     except Exception as exc:  # noqa: BLE001
+                        stats["errors"].append(f"{path}: {str(exc)[:120]}")
                         log.warning("goldedge_page_scan_error", path=path, error=str(exc))
                         continue
+                    stats["pages_scanned"] += 1
+                    stats["matches_seen"] += len(rows)
+                    if not rows:
+                        try:
+                            stats["empty_pages"].append(
+                                f"{path} -> {page.url} [{page.title()[:60]}]"
+                            )
+                        except Exception:  # noqa: BLE001
+                            stats["empty_pages"].append(path)
                     found = 0
                     for row in rows:
                         href = row.get("href") or ""
@@ -519,6 +551,7 @@ class GoldEdgeSource:
 
                 # Match pages: Betano's own price where the best price shows value.
                 ranked = sorted(candidates.items(), key=lambda kv: -kv[1][0])
+                stats["candidates"] = len(candidates)
                 opened = from_pages = 0
                 for href, (_cap, row) in ranked[:_MAX_EVENT_PAGES]:
                     try:
@@ -526,9 +559,13 @@ class GoldEdgeSource:
                         page.wait_for_timeout(1500)
                         table = page.evaluate(_BOOK_TABLE_JS)
                     except Exception as exc:  # noqa: BLE001
+                        stats["errors"].append(f"{href}: {str(exc)[:120]}")
                         log.warning("goldedge_event_page_error", href=href, error=str(exc))
                         continue
                     opened += 1
+                    stats["match_pages_opened"] = opened
+                    if any(_TARGET_BOOK_RE.search(r.get("book") or "") for r in table):
+                        stats["betano_listed"] += 1
                     repriced = row_with_book_prices(row, table)
                     if repriced is None:
                         continue
@@ -549,8 +586,10 @@ class GoldEdgeSource:
 
                 browser.close()
         except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"scrape: {str(exc)[:200]}")
             log.error("goldedge_scrape_error", error=str(exc))
 
+        stats["signals"] = len(signals)
         log.info("goldedge_signals_extracted", count=len(signals))
         return signals
 

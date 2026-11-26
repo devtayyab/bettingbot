@@ -562,17 +562,26 @@ def upload_goldedge_cookies(cookies: list[dict[str, Any]]) -> dict:
 
 
 @app.post("/goldedge/sync")
-def sync_goldedge(min_edge: float = Query(default=0.02, ge=0.0, le=1.0)) -> dict:
+def sync_goldedge(min_edge: float | None = Query(default=None, ge=0.0, le=1.0)) -> dict:
     """Fetch live value bets from GoldEdge and persist to the database."""
-    from ..sources.goldedge import sync_goldedge_to_db
+    from ..sources.goldedge import LAST_SCAN, sync_goldedge_to_db
 
     try:
         count = sync_goldedge_to_db(min_edge=min_edge)
-        return {
-            "status": "ok",
-            "new_signals": count,
-            "message": f"Successfully synced {count} value bets from GoldEdge!",
-        }
+        scan = dict(LAST_SCAN)
+        if scan.get("matches_seen", 0) == 0:
+            # Nothing was readable at all: that is a blocked/failed scrape, not "no value".
+            message = (
+                "GoldEdge scan read 0 matches - the site did not serve its odds pages "
+                "to this server (blocked IP or browser failure). See 'scan' for details."
+            )
+        else:
+            message = (
+                f"Synced {count} value bets from GoldEdge "
+                f"({scan.get('matches_seen', 0)} matches scanned, "
+                f"{scan.get('match_pages_opened', 0)} checked for Betano's price)."
+            )
+        return {"status": "ok", "new_signals": count, "message": message, "scan": scan}
     except Exception as exc:
         raise HTTPException(500, detail=f"GoldEdge sync failed: {exc}")
 
