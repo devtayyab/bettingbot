@@ -2122,3 +2122,87 @@ body,
     display: none;
   }
 }
+
+
+/* ============================================================================
+   REPORTS KPI CARDS, FILTER SPACING, & GOLDEDGE HARMONIZATION
+   ============================================================================ */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: #131416 !important;
+  border: 1px solid #24262b !important;
+}
+
+.kpi-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7c8089;
+}
+
+.kpi-value {
+  font-family: var(--font-mono);
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #f4f4f5;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-filters .form-field {
+  margin-bottom: 0 !important;
+}
+
+.settings-page {
+  max-width: 1020px;
+}
+
+.pill-status-paper {
+  background: rgba(212, 169, 56, 0.12) !important;
+  color: #e3b948 !important;
+  border: 1px solid rgba(212, 169, 56, 0.3) !important;
+}
+
+.toast-info {
+  background: rgba(212, 169, 56, 0.14) !important;
+  color: #f5c451 !important;
+  border: 1px solid rgba(212, 169, 56, 0.35) !important;
+}
+
+@media (max-width: 600px) {
+  .kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .report-filters .form-field {
+    grid-column: span 1 !important;
+  }
+}
+
+/* Sleek GoldEdge Dark Scrollbar for tables and panels */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0e10;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b2d34;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4a938;
+}

@@ -298,13 +298,13 @@ export const Reports: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={generateReport} disabled={loading}>
             {loading ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Generating…</> : '🔍 Generate Report'}
           </button>
 
           <button
-            className="btn btn-ghost"
+            className="btn btn-secondary"
             onClick={() => exportFile('csv')}
             disabled={exporting || reportData.length === 0}
             title="Download CSV formatted file"
@@ -313,7 +313,7 @@ export const Reports: React.FC = () => {
           </button>
 
           <button
-            className="btn btn-ghost"
+            className="btn btn-secondary"
             onClick={() => exportFile('xlsx')}
             disabled={exporting || reportData.length === 0}
             title="Download formatted Excel spreadsheet"
