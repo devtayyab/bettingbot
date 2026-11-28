@@ -1974,3 +1974,151 @@ textarea:focus {
     gap: 18px;
   }
 }
+
+
+/* ============================================================================
+   LAYOUT & OVERFLOW FIXES (SINGLE-ROW NAVBAR + ZERO PAGE HORIZONTAL SCROLL)
+   ============================================================================ */
+
+html,
+body,
+#root,
+.shell--topnav,
+.ge-main-wrap {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* Single-Row Compact Desktop Navbar (fits cleanly at 1280px+ without wrapping P&L pill) */
+.ge-navbar-inner {
+  padding: 8px 20px;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.ge-navbar-left {
+  gap: 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.ge-navbar .sidebar-logo {
+  width: 30px;
+  height: 30px;
+  font-size: 0.82rem;
+  border-radius: 8px;
+}
+
+.ge-brand-wordmark {
+  font-size: 1.02rem;
+}
+
+.ge-bookies-pill {
+  padding: 3px 8px;
+  font-size: 0.7rem;
+}
+
+.ge-nav-list {
+  gap: 2px;
+}
+
+.ge-nav-item {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  gap: 5px;
+}
+
+.ge-navbar-pnl {
+  padding: 3px 8px;
+  flex-shrink: 0;
+}
+
+.ge-navbar-pnl .topbar-stat {
+  padding: 0 7px;
+}
+
+.ge-navbar-pnl .topbar-stat__label {
+  font-size: 0.58rem;
+}
+
+.ge-navbar-pnl .topbar-stat__value {
+  font-size: 0.82rem;
+}
+
+.ge-navbar-pnl .topbar-divider {
+  height: 18px;
+}
+
+/* Prevent horizontal scrollbar inside global EDGE ticker strip */
+.ge-global-ticker-inner {
+  padding: 7px 20px;
+  overflow: hidden;
+}
+
+.ge-ticker-stream {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Eliminate Grid Blowout on Accounts, Reports, Results & LiveFeed */
+.accounts-layout {
+  grid-template-columns: 270px minmax(0, 1fr) !important;
+  gap: 18px;
+}
+
+.accounts-layout > *,
+.account-detail,
+.feed-page,
+.results-page,
+.accounts-page,
+.reports-page,
+.settings-page,
+.glass-panel,
+.glass-panel-solid {
+  min-width: 0;
+}
+
+.accounts-list {
+  top: 102px !important;
+}
+
+.account-stat-cards {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+}
+
+.account-stat.glass-panel-solid {
+  background: #131416 !important;
+  border: 1px solid #24262b !important;
+}
+
+.account-stat .metric-value {
+  font-size: 1.28rem !important;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1180px) {
+  .ge-navbar-inner {
+    flex-wrap: wrap;
+  }
+  .ge-navbar-pnl {
+    display: flex;
+  }
+}
+
+@media (max-width: 960px) {
+  .accounts-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .accounts-list {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .ge-navbar-pnl {
+    display: none;
+  }
+}
