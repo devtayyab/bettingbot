@@ -425,7 +425,7 @@ export const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  const [showGuide, setShowGuide] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
 
   const [cookieJson, setCookieJson] = useState('');
   const [cookieUploading, setCookieUploading] = useState(false);
@@ -847,24 +847,24 @@ export const Settings: React.FC = () => {
     <div className="settings-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title text-gradient">Settings & Strategy Guide</h1>
+          <h1 className="page-title text-gradient">Settings &amp; Strategy Guide</h1>
           <p className="page-subtitle">
             Live scanner rules, value thresholds, market coverage, and API key management — changes apply automatically
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="settings-save-bar">
           {Object.keys(edits).length > 0 && (
-            <span style={{ fontSize: '0.875rem', color: 'var(--status-warning)' }}>
+            <span className="ge-pill-count" style={{ color: '#f5c451', border: '1px solid rgba(212, 169, 56, 0.35)', padding: '5px 10px' }}>
               {Object.keys(edits).length} unsaved change{Object.keys(edits).length !== 1 ? 's' : ''}
             </span>
           )}
           {saved && (
-            <span style={{ fontSize: '0.875rem', color: 'var(--status-success)' }}>
-              ✓ Saved & applied to live scanner
+            <span style={{ fontSize: '0.84rem', color: '#4ade80', fontWeight: 600 }}>
+              ✓ Saved &amp; live
             </span>
           )}
           <button
-            className="btn btn-primary"
+            className={`btn ${Object.keys(edits).length > 0 ? 'btn-primary' : 'btn-secondary'}`}
             onClick={handleSave}
             disabled={saving || Object.keys(edits).length === 0}
           >
@@ -872,8 +872,10 @@ export const Settings: React.FC = () => {
               <>
                 <span className="spinner" style={{ width: '14px', height: '14px' }} /> Saving…
               </>
+            ) : Object.keys(edits).length > 0 ? (
+              `💾 Save Changes (${Object.keys(edits).length})`
             ) : (
-              '💾 Save Changes'
+              '✓ All Changes Saved'
             )}
           </button>
         </div>

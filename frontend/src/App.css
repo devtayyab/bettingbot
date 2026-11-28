@@ -2206,3 +2206,121 @@ body,
 ::-webkit-scrollbar-thumb:hover {
   background: #d4a938;
 }
+
+/* ============================================================================
+   SETTINGS PAGE: PROFESSIONAL 2-COLUMN GOLDEDGE GRID & HEADER ALIGNMENT
+   ============================================================================ */
+
+.settings-page {
+  max-width: 1240px !important;
+  margin: 0 auto;
+}
+
+.settings-page .page-header {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.settings-page .page-header > div:first-child {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.settings-group {
+  border-radius: 12px !important;
+  padding: 20px 22px !important;
+}
+
+.settings-group .config-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.config-field {
+  background: #16171b !important;
+  border: 1px solid #25272e !important;
+  border-radius: 10px !important;
+  padding: 15px 16px !important;
+  justify-content: space-between;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.config-field:hover {
+  border-color: #3a3524 !important;
+}
+
+.config-field--wide {
+  grid-column: 1 / -1;
+}
+
+.config-field--dirty {
+  border-color: rgba(212, 169, 56, 0.55) !important;
+  background: rgba(212, 169, 56, 0.06) !important;
+}
+
+.config-field__label {
+  font-size: 0.88rem !important;
+  font-weight: 700 !important;
+  color: #f4f4f5 !important;
+}
+
+.config-field__desc {
+  font-size: 0.77rem;
+  color: #8c9099;
+  line-height: 1.45;
+}
+
+.settings-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 860px) {
+  .settings-group .config-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-group .config-field:only-child,
+.settings-group .config-field:has(input[type="checkbox"]) {
+  grid-column: 1 / -1;
+}
+
+/* Keep single-row GoldEdge navbar cleanly aligned down to ~980px viewport */
+@media (max-width: 1260px) {
+  .ge-navbar-inner {
+    flex-wrap: nowrap;
+    padding: 7px 14px;
+    gap: 8px;
+  }
+  .ge-nav-item {
+    padding: 5px 8px;
+    font-size: 0.76rem;
+    gap: 4px;
+  }
+  .ge-bookies-pill {
+    padding: 3px 7px;
+    font-size: 0.67rem;
+  }
+  .ge-navbar-pnl {
+    padding: 2px 6px;
+  }
+  .ge-navbar-pnl .topbar-stat {
+    padding: 0 5px;
+  }
+  .ge-navbar-pnl .topbar-stat__label {
+    font-size: 0.54rem;
+  }
+  .ge-navbar-pnl .topbar-stat__value {
+    font-size: 0.76rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .ge-navbar-inner {
+    flex-wrap: wrap;
+  }
+}
