@@ -1437,3 +1437,337 @@ textarea:focus {
     margin-left: 0;
   }
 }
+
+
+/* ============================================================================
+   GOLDEDGE DESKTOP SHELL: TOP NAVBAR, MULTI-EDGE TICKER & SPORT PILL STRIP
+   ============================================================================ */
+
+.shell--topnav {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.ge-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 120;
+  background: rgba(11, 12, 14, 0.96);
+  border-bottom: 1px solid #202227;
+  backdrop-filter: blur(12px);
+}
+
+.ge-navbar-inner {
+  max-width: 1420px;
+  margin: 0 auto;
+  padding: 9px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ge-navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ge-brand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ge-brand-wordmark {
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: #f4f4f5;
+}
+
+.ge-status-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ge-bookies-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #151619;
+  border: 1px solid #272930;
+  color: #d4d4d8;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ge-dot--green { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.ge-dot--gold { background: #e3b948; box-shadow: 0 0 6px #e3b948; }
+.ge-dot--red { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+
+.ge-nav {
+  display: flex;
+  align-items: center;
+}
+
+.ge-nav-list {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+
+.ge-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #a1a1aa;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+
+.ge-nav-item:hover {
+  color: #f4f4f5;
+  background: #17181c;
+}
+
+.ge-nav-item.active {
+  background: #1b1d22;
+  color: #ffffff;
+  border-color: rgba(212, 169, 56, 0.45);
+  box-shadow: inset 0 -2px 0 #d4a938;
+  font-weight: 600;
+}
+
+.ge-nav-icon {
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+
+.ge-navbar-pnl {
+  padding: 4px 12px;
+  background: #131417;
+  border: 1px solid #25272e;
+  border-radius: 999px;
+}
+
+.ge-navbar-pnl .topbar-stat {
+  padding: 0 11px;
+}
+
+.ge-navbar-pnl .topbar-divider {
+  height: 22px;
+  background: #272930;
+}
+
+/* Slim Notice Ribbon */
+.ge-notice-ribbon {
+  background: rgba(212, 169, 56, 0.08);
+  border-bottom: 1px solid rgba(212, 169, 56, 0.22);
+  color: #e4c678;
+  font-size: 0.74rem;
+  font-weight: 500;
+  text-align: center;
+  padding: 5px 16px;
+  letter-spacing: 0.01em;
+}
+
+/* Global Multi-Edge Ticker Strip */
+.ge-global-ticker {
+  background: #0d0e11;
+  border-bottom: 1px solid #202227;
+  cursor: pointer;
+}
+
+.ge-global-ticker:hover {
+  background: #111216;
+}
+
+.ge-global-ticker-inner {
+  max-width: 1420px;
+  margin: 0 auto;
+  padding: 7px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ge-global-ticker-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.ge-ticker-stream {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  font-size: 0.76rem;
+}
+
+.ge-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ge-ticker-sep {
+  color: #32353d;
+  margin-right: 4px;
+}
+
+.ge-ticker-match {
+  color: #e4e4e7;
+  font-weight: 600;
+}
+
+.ge-ticker-sel {
+  color: #9ca0aa;
+}
+
+.ge-ticker-odds {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #f4f4f5;
+  background: #181a1f;
+  border: 1px solid #2a2c33;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.ge-ticker-empty {
+  color: #71747c;
+  font-size: 0.76rem;
+}
+
+/* Main Content Container */
+.ge-main-wrap {
+  width: 100%;
+}
+
+.ge-content-container {
+  max-width: 1420px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 24px 48px !important;
+}
+
+/* Breadcrumb & Sport Emoji Pills Row */
+.ge-breadcrumb {
+  font-size: 0.75rem;
+  color: #71747c;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ge-breadcrumb span:last-child {
+  color: #c4c7ce;
+}
+
+.ge-sport-pills {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.ge-sport-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #121316;
+  border: 1px solid #26282e;
+  color: #a1a1aa;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+
+.ge-sport-pill:hover {
+  border-color: #46402c;
+  color: #f4f4f5;
+  background: #17181c;
+}
+
+.ge-sport-pill--active {
+  background: rgba(212, 169, 56, 0.11);
+  border-color: #d4a938;
+  color: #f5c451;
+  font-weight: 600;
+}
+
+/* Dense GoldEdge Table Polish */
+.data-table th {
+  background: #0f1013 !important;
+  border-bottom: 1px solid #25272e !important;
+  color: #7c8089 !important;
+  font-family: var(--font-sans);
+  font-size: 0.69rem;
+  letter-spacing: 0.08em;
+}
+
+.data-table td {
+  border-bottom: 1px solid #1b1d22 !important;
+}
+
+@media (max-width: 1120px) {
+  .ge-navbar-pnl {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .ge-navbar-inner {
+    padding: 8px 14px;
+    gap: 8px;
+  }
+  .ge-nav {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ge-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .ge-global-ticker-inner {
+    padding: 7px 14px;
+  }
+  .ge-content-container {
+    padding: 14px 14px 36px !important;
+  }
+}

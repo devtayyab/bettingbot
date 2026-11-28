@@ -15,35 +15,20 @@ const NAV_ITEMS = [
 
 export const Nav: React.FC<NavProps> = ({ active, onChange }) => {
   return (
-    <nav className="sidebar">
-      <div className="sidebar-brand">
-        <span className="sidebar-logo" aria-hidden="true">VB</span>
-        <div>
-          <div className="sidebar-title">
-            Value<span className="ge-brand-gold">Bet</span>
-          </div>
-          <div className="sidebar-sub">GOLDEDGE TERMINAL</div>
-        </div>
-      </div>
-
-      <ul className="sidebar-nav">
+    <nav className="ge-nav" aria-label="Main navigation">
+      <ul className="ge-nav-list">
         {NAV_ITEMS.map((item) => (
           <li key={item.id}>
             <button
-              className={`sidebar-item ${active === item.id ? 'active' : ''}`}
+              className={`ge-nav-item ${active === item.id ? 'active' : ''}`}
               onClick={() => onChange(item.id)}
             >
-              <span className="sidebar-icon">{item.icon}</span>
+              <span className="ge-nav-icon">{item.icon}</span>
               <span>{item.label}</span>
             </button>
           </li>
         ))}
       </ul>
-
-      <div className="sidebar-footer">
-        <div className="sidebar-footer-text">ValueBet Pilot</div>
-        <div className="sidebar-footer-sub">© 2026</div>
-      </div>
     </nav>
   );
 };

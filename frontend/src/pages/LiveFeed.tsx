@@ -4,6 +4,18 @@ import { EditBetModal } from '../components/EditBetModal';
 
 const API = '/api';
 
+const QUICK_SPORT_PILLS = [
+  { key: '', label: 'All sports', icon: '⚡' },
+  { key: 'soccer', label: 'Football', icon: '⚽' },
+  { key: 'tennis', label: 'Tennis', icon: '🎾' },
+  { key: 'basketball', label: 'Basketball', icon: '🏀' },
+  { key: 'ice_hockey', label: 'Ice Hockey', icon: '🏒' },
+  { key: 'american_football', label: 'NFL', icon: '🏈' },
+  { key: 'baseball', label: 'Baseball', icon: '⚾' },
+  { key: 'mma', label: 'MMA', icon: '🥊' },
+  { key: 'volleyball', label: 'Volleyball', icon: '🏐' },
+];
+
 const SPORTS = [
   'soccer', 'tennis', 'basketball', 'american_football', 'baseball',
   'ice_hockey', 'cricket', 'rugby_league', 'rugby_union', 'golf',
@@ -491,6 +503,26 @@ export const LiveFeed: React.FC = () => {
         ))}
       </div>
 
+      {/* GoldEdge Breadcrumb & Quick Sport Pill Strip */}
+      <div className="ge-breadcrumb">
+        <span>Home</span>
+        <span>›</span>
+        <span>Open Value Bets</span>
+      </div>
+
+      <div className="ge-sport-pills">
+        {QUICK_SPORT_PILLS.map((sp) => (
+          <button
+            key={sp.key || 'all'}
+            className={`ge-sport-pill ${sportFilter === sp.key ? 'ge-sport-pill--active' : ''}`}
+            onClick={() => setSportFilter(sp.key)}
+          >
+            <span>{sp.icon}</span>
+            <span>{sp.label}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Page Header */}
       <div className="page-header">
         <div>
@@ -503,35 +535,15 @@ export const LiveFeed: React.FC = () => {
           <span className={`badge-dot ${connected ? 'positive' : 'negative'}`}>
             {connected ? 'Stream Active' : error ?? 'Reconnecting…'}
           </span>
+          {topEdgeSignal && (
+            <span className="ge-bookies-pill" style={{ borderColor: 'rgba(34, 197, 94, 0.35)', color: '#4ade80' }}>
+              Peak {formatEdge(topEdgeSignal.edge)}
+            </span>
+          )}
           <span className="ge-mono" style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             {filtered.length} signal{filtered.length !== 1 ? 's' : ''}
           </span>
         </div>
-      </div>
-
-      {/* GoldEdge Live Edge Ticker Strip */}
-      <div className="ge-ticker-bar">
-        <span className="ge-ticker-tag">
-          <span className="ge-ticker-dot" />
-          EDGE
-        </span>
-        {topEdgeSignal ? (
-          <div className="ge-ticker-content">
-            <span className="ge-ticker-ev">{formatEdge(topEdgeSignal.edge)}</span>
-            <span className="ge-ticker-book">@Stoiximan</span>
-            <span style={{ color: '#52525b' }}>|</span>
-            <strong style={{ color: '#f4f4f5' }}>
-              {topEdgeSignal.event_name || `Match #${topEdgeSignal.id}`}
-            </strong>
-            <span style={{ color: '#a1a1aa' }}>
-              · {topEdgeSignal.selection} ({formatEuropeanOdds(topEdgeSignal.target_odds)})
-            </span>
-          </div>
-        ) : (
-          <div className="ge-ticker-content" style={{ color: '#71747c' }}>
-            {connected ? 'Scanning sharp markets for positive EV opportunities…' : 'Connecting to live value feed…'}
-          </div>
-        )}
       </div>
 
       {/* Quota Warning Banner */}

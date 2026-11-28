@@ -32,19 +32,39 @@ interface HealthData {
   unconfirmed_bets?: number;
 }
 
+interface TickerSignal {
+  id: number;
+  event_name: string | null;
+  selection: string;
+  edge: number;
+  target_odds: number;
+  status: string;
+  sport: string;
+}
+
 function App() {
   const [page, setPage] = useState('feed');
   const [pnl, setPnl] = useState<PnlSummary | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [tickerSignals, setTickerSignals] = useState<TickerSignal[]>([]);
 
   useEffect(() => {
     const fetchMeta = async () => {
-      const [pnlRes, healthRes] = await Promise.all([
+      const [pnlRes, healthRes, sigRes] = await Promise.all([
         fetch(`${API}/pnl`),
         fetch(`${API}/health`),
+        fetch(`${API}/signals?limit=25`),
       ]);
       if (pnlRes.ok) setPnl(await pnlRes.json());
       if (healthRes.ok) setHealth(await healthRes.json());
+      if (sigRes.ok) {
+        const list: TickerSignal[] = await sigRes.json().catch(() => []);
+        if (Array.isArray(list)) {
+          const active = list.filter((s) => s.status === 'detected' || s.status === 'approved');
+          const pool = active.length > 0 ? active : list;
+          setTickerSignals([...pool].sort((a, b) => b.edge - a.edge).slice(0, 3));
+        }
+      }
     };
     fetchMeta();
     const interval = setInterval(fetchMeta, 30_000);
@@ -64,32 +84,49 @@ function App() {
   };
 
   return (
-    <div className="shell">
-      <Nav active={page} onChange={setPage} />
+    <div className="shell shell--topnav">
+      {/* GoldEdge Horizontal Top Navbar */}
+      <header className="ge-navbar">
+        <div className="ge-navbar-inner">
+          <div className="ge-navbar-left">
+            <button
+              type="button"
+              className="ge-brand-btn"
+              onClick={() => setPage('feed')}
+              title="ValueBet GoldEdge Terminal"
+            >
+              <span className="sidebar-logo" aria-hidden="true">VB</span>
+              <span className="ge-brand-wordmark">
+                Value<span className="ge-brand-gold">Bet</span>
+              </span>
+            </button>
 
-      <div className="main-area">
-        {/* Top status bar */}
-        <div className="topbar glass-panel-solid">
-          <div className="topbar-left">
             {health && (
-              <>
-                <span className={`badge-dot ${health.dry_run ? 'neutral' : 'positive'}`}>
-                  {health.dry_run ? 'Paper Mode' : 'Live Mode'}
+              <div className="ge-status-pills">
+                <span className="ge-bookies-pill" title={health.dry_run ? 'Paper mode' : 'Real betting active'}>
+                  <span className={`ge-dot ${health.dry_run ? 'ge-dot--gold' : 'ge-dot--green'}`} />
+                  <span>{health.dry_run ? 'Paper' : 'Live'}</span>
                 </span>
-                <span className={`badge-dot ${health.has_session_cookies ? 'positive' : 'negative'}`}>
-                  {health.has_session_cookies ? 'Session OK' : 'No Session'}
+                <span
+                  className="ge-bookies-pill"
+                  title={health.has_session_cookies ? 'Stoiximan session active' : 'No Stoiximan cookies'}
+                >
+                  <span className={`ge-dot ${health.has_session_cookies ? 'ge-dot--green' : 'ge-dot--red'}`} />
+                  <span>{health.has_session_cookies ? 'Session OK' : 'No Session'}</span>
                 </span>
                 {(health.unconfirmed_bets ?? 0) > 0 && (
-                  <span className="badge-dot" style={{ color: 'var(--status-warning)' }}>
-                    {health.unconfirmed_bets} unconfirmed
+                  <span className="ge-bookies-pill" style={{ color: '#f59e0b' }}>
+                    <span>{health.unconfirmed_bets} unconfirmed</span>
                   </span>
                 )}
-              </>
+              </div>
             )}
           </div>
 
+          <Nav active={page} onChange={setPage} />
+
           {view && (
-            <div className="topbar-pnl">
+            <div className="topbar-pnl ge-navbar-pnl">
               <div className="topbar-stat">
                 <span className="topbar-stat__label">{view.label}P&amp;L</span>
                 <span className={`topbar-stat__value ${view.pnl >= 0 ? 'positive' : 'negative'}`}>
@@ -116,16 +153,51 @@ function App() {
             </div>
           )}
         </div>
+      </header>
 
-        {/* Page Content */}
-        <div className="content-area">
+      {/* GoldEdge Warm Notice Ribbon */}
+      <div className="ge-notice-ribbon">
+        <span>⚡ Sharp no-vig EV detection active — PropLine / Odds API live scanning &amp; automatic match settlement enabled</span>
+      </div>
+
+      {/* GoldEdge Full-Width Multi-Edge Ticker Strip */}
+      <div className="ge-global-ticker" onClick={() => setPage('feed')} role="button" tabIndex={0}>
+        <div className="ge-global-ticker-inner">
+          <span className="ge-ticker-tag">
+            <span className="ge-ticker-dot" />
+            EDGE
+          </span>
+          {tickerSignals.length > 0 ? (
+            <div className="ge-ticker-stream">
+              {tickerSignals.map((ts, idx) => (
+                <div key={ts.id} className="ge-ticker-item">
+                  {idx > 0 && <span className="ge-ticker-sep">|</span>}
+                  <span className="ge-ticker-ev">
+                    +{(ts.edge * 100).toFixed(2).replace('.', ',')}%
+                  </span>
+                  <span className="ge-ticker-book">@Stoiximan</span>
+                  <span className="ge-ticker-match">{ts.event_name || `Match #${ts.id}`}</span>
+                  <span className="ge-ticker-sel">{ts.selection}</span>
+                  <span className="ge-ticker-odds">{ts.target_odds.toFixed(2).replace('.', ',')}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="ge-ticker-empty">Scanning for value across sharp markets…</span>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content Container */}
+      <main className="main-area ge-main-wrap">
+        <div className="content-area ge-content-container">
           {page === 'feed' && <LiveFeed />}
           {page === 'results' && <Results />}
           {page === 'accounts' && <Accounts />}
           {page === 'reports' && <Reports />}
           {page === 'settings' && <Settings />}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
