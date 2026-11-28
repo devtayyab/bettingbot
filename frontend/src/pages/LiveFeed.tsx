@@ -232,6 +232,8 @@ export const LiveFeed: React.FC = () => {
   const [editSignal, setEditSignal] = useState<SignalData | null>(null);
   const [localSignals, setLocalSignals] = useState<Map<number, Partial<SignalData>>>(new Map());
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'approved' | 'placed'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'edge' | 'kickoff' | 'fair'>('newest');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [sportFilter, setSportFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
   const [betTypeFilter, setBetTypeFilter] = useState('');
@@ -245,7 +247,7 @@ export const LiveFeed: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, sportFilter, marketFilter, betTypeFilter]);
+  }, [statusFilter, sportFilter, marketFilter, betTypeFilter, sortBy, sortDir]);
 
   useEffect(() => {
     fetch(`${API}/odds-api/status`)
@@ -315,12 +317,21 @@ export const LiveFeed: React.FC = () => {
     let available = 0;
     let approved = 0;
     let placed = 0;
+    let edgeSum = 0;
+    let edgeCount = 0;
     for (const s of mergedSignals) {
-      if (s.status === 'detected' || s.status === 'approved') available += 1;
+      if (s.status === 'detected' || s.status === 'approved') {
+        available += 1;
+        edgeSum += s.edge;
+        edgeCount += 1;
+      }
       if (s.status === 'approved') approved += 1;
       if (s.status === 'placed') placed += 1;
     }
-    return { all: mergedSignals.length, available, approved, placed };
+    const fallbackSum = edgeCount === 0 ? mergedSignals.reduce((acc, s) => acc + s.edge, 0) : edgeSum;
+    const fallbackCnt = edgeCount === 0 ? mergedSignals.length : edgeCount;
+    const avgEdgePct = fallbackCnt > 0 ? ((fallbackSum / fallbackCnt) * 100).toFixed(2).replace('.', ',') : '0,00';
+    return { all: mergedSignals.length, available, approved, placed, avgEdgePct };
   }, [mergedSignals]);
 
   const topEdgeSignal = useMemo(() => {
@@ -329,6 +340,15 @@ export const LiveFeed: React.FC = () => {
     if (pool.length === 0) return null;
     return [...pool].sort((a, b) => b.edge - a.edge)[0];
   }, [mergedSignals]);
+
+  const handleSort = (col: 'edge' | 'kickoff' | 'fair') => {
+    if (sortBy === col) {
+      setSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortBy(col);
+      setSortDir(col === 'edge' ? 'desc' : 'asc');
+    }
+  };
 
   const filtered = mergedSignals
     .filter((s) => {
@@ -347,6 +367,18 @@ export const LiveFeed: React.FC = () => {
       return true;
     })
     .sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      if (sortBy === 'edge') return (a.edge - b.edge) * dir;
+      if (sortBy === 'kickoff') {
+        const ta = new Date(a.event_start_time ?? a.detected_at ?? 0).getTime() || 0;
+        const tb = new Date(b.event_start_time ?? b.detected_at ?? 0).getTime() || 0;
+        return (ta - tb) * dir;
+      }
+      if (sortBy === 'fair') {
+        const fa = a.fair_prob > 0 ? 1 / a.fair_prob : 0;
+        const fb = b.fair_prob > 0 ? 1 / b.fair_prob : 0;
+        return (fa - fb) * dir;
+      }
       const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
       const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
       return timeB - timeA;
@@ -560,6 +592,29 @@ export const LiveFeed: React.FC = () => {
         </div>
       )}
 
+      {/* GoldEdge 4-Stat Typographic Header Strip */}
+      <div className="ge-kpi-strip">
+        <div className="ge-kpi-stat">
+          <span className="ge-kpi-stat__label">AVAILABLE</span>
+          <span className="ge-kpi-stat__val">{statusCounts.available}</span>
+        </div>
+        <div className="ge-kpi-stat">
+          <span className="ge-kpi-stat__label">TOTAL SIGNALS</span>
+          <span className="ge-kpi-stat__val">{statusCounts.all}</span>
+        </div>
+        <div className="ge-kpi-stat">
+          <span className="ge-kpi-stat__label">TAKEN</span>
+          <span className="ge-kpi-stat__val">{statusCounts.placed}</span>
+        </div>
+        <div className="ge-kpi-stat">
+          <span className="ge-kpi-stat__label">AVG EDGE</span>
+          <span className="ge-kpi-stat__val" style={{ color: '#4ade80' }}>
+            +{statusCounts.avgEdgePct}%
+            <span className="ge-kpi-stat__sub">({statusCounts.all})</span>
+          </span>
+        </div>
+      </div>
+
       {/* GoldEdge Rounded Status Filter Tabs */}
       <div className="ge-filter-pills">
         <button
@@ -670,20 +725,20 @@ export const LiveFeed: React.FC = () => {
           </button>
         </div>
 
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span className="pill pill-live" style={{ fontSize: '0.68rem' }}>LIVE</span>
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span className="pill pill-live" style={{ fontSize: '0.66rem' }}>LIVE</span>
           <span>In-play</span>
           <span style={{ marginLeft: '6px' }}>
-            <span className="pill pill-prematch" style={{ fontSize: '0.68rem' }}>PRE-MATCH</span>
+            <span className="pill pill-prematch" style={{ fontSize: '0.66rem' }}>PRE-MATCH</span>
           </span>
           <span>Pre-match</span>
           <span style={{ marginLeft: '10px', color: 'var(--text-secondary)' }}>
-            💡 Cards rank EV%, Kelly sizing, Fair Odds, and Sharp reference prices — click any card for stake cap, profit/loss projection &amp; execution.
+            💡 Click any column header (EV, Event, Fair Odds) to sort · Click any row for full market odds &amp; profit breakdown.
           </span>
         </div>
       </div>
 
-      {/* Signal Cards */}
+      {/* Signal Rows */}
       {filtered.length === 0 ? (
         <div className="glass-panel empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-8)' }}>
           <div>
@@ -703,6 +758,44 @@ export const LiveFeed: React.FC = () => {
       ) : (
         <>
           {renderPagination('top')}
+
+          {/* Desktop 6-Column GoldEdge Dashboard Header */}
+          <div className="ge-table-header">
+            <div>
+              <button
+                type="button"
+                className={`ge-sort-btn ${sortBy === 'edge' ? 'ge-sort-btn--active' : ''}`}
+                onClick={() => handleSort('edge')}
+              >
+                <span>EV</span>
+                <span>{sortBy === 'edge' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
+              </button>
+            </div>
+            <div>
+              <button
+                type="button"
+                className={`ge-sort-btn ${sortBy === 'kickoff' ? 'ge-sort-btn--active' : ''}`}
+                onClick={() => handleSort('kickoff')}
+              >
+                <span>EVENT · KICKOFF</span>
+                <span>{sortBy === 'kickoff' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
+              </button>
+            </div>
+            <div>PICK</div>
+            <div>BOOKMAKERS</div>
+            <div>
+              <button
+                type="button"
+                className={`ge-sort-btn ${sortBy === 'fair' ? 'ge-sort-btn--active' : ''}`}
+                onClick={() => handleSort('fair')}
+              >
+                <span>FAIR ODDS</span>
+                <span>{sortBy === 'fair' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
+              </button>
+            </div>
+            <div>SHARPS</div>
+          </div>
+
           <div className="bet-cards">
             {paginatedSignals.map((s) => {
               const isExpanded = expandedIds.has(s.id);
@@ -719,17 +812,17 @@ export const LiveFeed: React.FC = () => {
               return (
                 <div
                   key={s.id}
-                  className={`ge-card ${s.is_live ? 'ge-card--live' : s.edge >= 0.04 ? 'ge-card--strong' : ''}`}
+                  className={`ge-row-card ${s.is_live ? 'ge-row-card--live' : s.edge >= 0.04 ? 'ge-row-card--strong' : ''}`}
                   onClick={() => toggleExpand(s.id)}
                 >
-                  {/* GoldEdge Card Header: +EV% | Fixture & League | Expand */}
-                  <div className="ge-card-top">
-                    <div className="ge-ev-col">
+                  <div className="ge-row-grid">
+                    {/* Col 1: EV + Badges */}
+                    <div className="ge-col-ev">
                       <span className="ge-ev-value">{formatEdge(s.edge)}</span>
                       <span className="ge-ev-sub">EV · {formatRelativeTime(s.detected_at)}</span>
                       <div className="ge-badges-row">
                         {s.is_live ? (
-                          <span className="pill pill-live" style={{ fontSize: '0.62rem', padding: '1px 7px' }}>LIVE</span>
+                          <span className="pill pill-live" style={{ fontSize: '0.6rem', padding: '1px 6px' }}>LIVE</span>
                         ) : (
                           <span className="ge-code-badge ge-code-badge--gold">PRE</span>
                         )}
@@ -737,27 +830,90 @@ export const LiveFeed: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="ge-match-col">
+                    {/* Col 2: Event & Kickoff */}
+                    <div className="ge-col-event">
                       <div className="ge-league-line">
                         <span>{betTypeInfo.icon}</span>
                         <span style={{ textTransform: 'capitalize' }}>{s.sport.replace('_', ' ')}</span>
-                        <span>·</span>
-                        <span style={{ color: betTypeInfo.color, fontWeight: 600 }}>{betTypeInfo.label}</span>
                       </div>
                       <div className="ge-match-title">
                         {s.event_name ? `${s.event_name} ↗` : `Match #${s.id}`}
                       </div>
                       <div className="ge-time-line">
-                        {s.event_start_time ? `⚽ ${formatDateTime(s.event_start_time)} · ` : ''}
-                        Found {formatDateTime(s.detected_at)}
+                        {s.event_start_time ? formatDateTime(s.event_start_time) : `Found ${formatDateTime(s.detected_at)}`}
                       </div>
                     </div>
 
-                    <div className="ge-top-actions">
+                    {/* Col 3: Pick & STRONG Badge */}
+                    <div className="ge-col-pick">
+                      <span className="ge-selection-name" style={{ fontSize: '0.95rem' }}>{s.selection}</span>
+                      <span className="ge-market-sub">{betTypeInfo.label}</span>
+                      {s.edge >= 0.04 ? (
+                        <span className="ge-strong-badge">STRONG</span>
+                      ) : (
+                        <span className="ge-code-badge ge-code-badge--dark">{s.market_type}</span>
+                      )}
+                    </div>
+
+                    {/* Col 4: Bookmaker, Decimal Odds, Kelly & Emerald Action */}
+                    <div className="ge-col-bookie" onClick={(e) => e.stopPropagation()}>
+                      <div className="ge-bookie-left">
+                        <span className="ge-bookie-link">Stoiximan ↗</span>
+                        <span className="ge-edge-tag" style={{ fontSize: '0.7rem' }}>
+                          lag {formatEdge(s.edge)}
+                        </span>
+                      </div>
+
+                      <div className="ge-odds-block">
+                        <div className="ge-odds-big">{formatEuropeanOdds(s.target_odds)}</div>
+                        <div className="ge-kelly-tag" style={{ fontSize: '0.7rem' }}>
+                          KELLY {formatEuropeanCurrency(s.recommended_stake)}
+                        </div>
+                      </div>
+
+                      {s.status === 'detected' && (
+                        <button
+                          className="ge-take-btn"
+                          onClick={() => doAction(s.id, 'approve')}
+                        >
+                          ✓ Approve
+                        </button>
+                      )}
+                      {s.status === 'approved' && (
+                        <button
+                          className="ge-take-btn"
+                          onClick={() => doAction(s.id, 'place')}
+                        >
+                          ✓ Place
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Col 5: Fair Odds & BEST Badge */}
+                    <div className="ge-col-fair">
+                      <span className="ge-fair-odds">{formatEuropeanOdds(fairDecimal)}</span>
+                      <span className="ge-ev-sub">Prob {winAccuracy}%</span>
+                      <div className="ge-sharp-meta">
+                        <span style={{ color: '#c9a23f' }}>Pin {formatEuropeanOdds(pinOddsVal)}</span>
+                        {s.edge >= 0.05 && <span className="ge-best-pill">BEST</span>}
+                      </div>
+                    </div>
+
+                    {/* Col 6: Sharps & Limit / Expand */}
+                    <div className="ge-col-sharps">
+                      <div className="ge-sharps-info">
+                        <span>Pinnacle {formatEuropeanOdds(pinOddsVal)}</span>
+                        <span>Betfair {formatEuropeanOdds(bfOddsVal)}</span>
+                        {s.max_bet ? (
+                          <span className="ge-limit-line">LIMIT {formatEuropeanCurrency(s.max_bet)}</span>
+                        ) : (
+                          <span style={{ color: '#6b7280', fontSize: '0.68rem' }}>Click for odds ▾</span>
+                        )}
+                      </div>
                       <button
                         className="btn btn-ghost btn-sm btn-icon"
-                        style={{ padding: '2px 8px', fontSize: '0.75rem', height: '28px', color: '#8c9099' }}
-                        title={isExpanded ? 'Collapse details' : 'Expand details'}
+                        style={{ padding: '2px 7px', fontSize: '0.75rem', height: '26px', color: '#8c9099' }}
+                        title={isExpanded ? 'Collapse details' : 'Expand market odds & controls'}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleExpand(s.id);
@@ -768,108 +924,22 @@ export const LiveFeed: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Selection + STRONG Badge */}
-                  <div className="ge-selection-row">
-                    <div className="ge-selection-main">
-                      <span className="ge-selection-name">{s.selection}</span>
-                      <span className="ge-market-sub">{betTypeInfo.label}</span>
-                    </div>
-                    {s.edge >= 0.04 ? (
-                      <span className="ge-strong-badge">STRONG</span>
-                    ) : (
-                      <span
-                        className="pill"
-                        style={{
-                          background: betTypeInfo.bg,
-                          color: betTypeInfo.color,
-                          border: `1px solid ${betTypeInfo.border}`,
-                          fontWeight: 600,
-                          fontSize: '0.7rem',
-                        }}
-                      >
-                        {betTypeInfo.label}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Target Bookmaker + Kelly + Big Odds + Direct Emerald Action */}
-                  <div className="ge-bookie-row">
-                    <div className="ge-bookie-left">
-                      <span className="ge-bookie-link" title="Target Placement Sportsbook">
-                        Stoiximan ↗
-                      </span>
-                      <div className="ge-kelly-line">
-                        <span className="ge-kelly-tag">KELLY {formatEuropeanCurrency(s.recommended_stake)}</span>
-                        <span className="ge-edge-tag">edge {formatEdge(s.edge)}</span>
-                      </div>
-                    </div>
-
-                    <div className="ge-bookie-right">
-                      <div className="ge-odds-block">
-                        <div className="ge-odds-big">{formatEuropeanOdds(s.target_odds)}</div>
-                        <div className="ge-odds-diff">Win {winAccuracy}%</div>
-                      </div>
-                      {s.status === 'detected' && (
-                        <button
-                          className="ge-take-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            doAction(s.id, 'approve');
-                          }}
-                        >
-                          ✓ Approve
-                        </button>
-                      )}
-                      {s.status === 'approved' && (
-                        <button
-                          className="ge-take-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            doAction(s.id, 'place');
-                          }}
-                        >
-                          ✓ Place
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Split Footer: FAIR ODDS vs SHARPS & MARKET ODDS */}
-                  <div className="ge-split-footer" onClick={(e) => e.stopPropagation()}>
-                    <div className="ge-footer-col">
-                      <div className="ge-footer-label">FAIR ODDS</div>
-                      <div className="ge-fair-odds">
-                        <span>{formatEuropeanOdds(fairDecimal)}</span>
-                        <span className="ge-ev-sub">({winAccuracy}% prob)</span>
-                      </div>
-                      <div className="ge-sharp-meta">
-                        <span>Pin {formatEuropeanOdds(pinOddsVal)} · BF {formatEuropeanOdds(bfOddsVal)}</span>
-                        {s.edge >= 0.05 && <span className="ge-best-pill">BEST</span>}
-                      </div>
-                    </div>
-
-                    <div className="ge-footer-col">
-                      <div className="ge-footer-label">SHARPS &amp; MARKET ODDS</div>
-                      <OddsBoxes
-                        allMarketOdds={s.all_market_odds}
-                        homeOdds={s.home_odds}
-                        drawOdds={s.draw_odds}
-                        awayOdds={s.away_odds}
-                        selectedSelection={s.selection}
-                        marketType={s.market_type}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="expand-toggle-indicator" style={{ marginTop: '8px' }}>
-                    <span>{isExpanded ? '▲ Hide risk details & controls' : '▼ Click card for risk cap, profit projection & manual controls'}</span>
-                  </div>
-
                   {isExpanded && (
                     <div
                       className="ge-drawer"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      <div style={{ marginBottom: '12px' }}>
+                        <div className="ge-footer-label" style={{ marginBottom: '6px' }}>ALL MARKET ODDS COMPARISON</div>
+                        <OddsBoxes
+                          allMarketOdds={s.all_market_odds}
+                          homeOdds={s.home_odds}
+                          drawOdds={s.draw_odds}
+                          awayOdds={s.away_odds}
+                          selectedSelection={s.selection}
+                          marketType={s.market_type}
+                        />
+                      </div>
                       <div className="bet-card__stats">
                         <div className="stat-item">
                           <span className="stat-label">Recommended Stake</span>

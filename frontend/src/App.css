@@ -1771,3 +1771,206 @@ textarea:focus {
     padding: 14px 14px 36px !important;
   }
 }
+
+
+/* ============================================================================
+   GOLDEDGE DESKTOP VALUEBETS DASHBOARD: KPI BAR & 6-COL HORIZONTAL BET ROWS
+   ============================================================================ */
+
+.ge-kpi-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 4px 2px;
+}
+
+.ge-kpi-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ge-kpi-stat__label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71747c;
+}
+
+.ge-kpi-stat__val {
+  font-family: var(--font-mono);
+  font-size: 1.48rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #f4f4f5;
+  font-variant-numeric: tabular-nums;
+}
+
+.ge-kpi-stat__sub {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #71747c;
+  margin-left: 5px;
+}
+
+/* Force single full-width stack for desktop 6-col table rows */
+.bet-cards {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+/* Sticky-style Column Header above Value Bet Rows */
+.ge-table-header {
+  display: grid;
+  grid-template-columns: 108px minmax(190px, 1.35fr) minmax(165px, 1.05fr) minmax(265px, 1.55fr) 118px minmax(165px, 1.05fr);
+  gap: 14px;
+  padding: 6px 18px 8px;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71747c;
+  align-items: center;
+}
+
+.ge-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #71747c;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.ge-sort-btn:hover,
+.ge-sort-btn--active {
+  color: #e3b948;
+}
+
+/* Horizontal Value Bet Row Card */
+.ge-row-card {
+  background: #121315;
+  border: 1px solid #24262b;
+  border-radius: 12px;
+  padding: 13px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ge-row-card:hover {
+  border-color: rgba(212, 169, 56, 0.45);
+  background: #151619;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.38);
+}
+
+.ge-row-card--live {
+  border-left: 3px solid #ef4444;
+}
+
+.ge-row-card--strong {
+  border-left: 3px solid #d4a938;
+}
+
+.ge-row-grid {
+  display: grid;
+  grid-template-columns: 108px minmax(190px, 1.35fr) minmax(165px, 1.05fr) minmax(265px, 1.55fr) 118px minmax(165px, 1.05fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.ge-col-ev {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ge-col-event {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ge-col-pick {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.ge-col-bookie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #16171b;
+  border: 1px solid #22242a;
+}
+
+.ge-col-fair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ge-col-sharps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ge-sharps-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #9ca0aa;
+}
+
+.ge-limit-line {
+  color: #38bdf8;
+  font-weight: 600;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 1060px) {
+  .ge-table-header {
+    display: none;
+  }
+  .ge-row-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  .ge-col-bookie {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .ge-row-card {
+    padding: 14px;
+  }
+  .ge-row-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .ge-kpi-strip {
+    gap: 18px;
+  }
+}
