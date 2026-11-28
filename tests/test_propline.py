@@ -126,6 +126,28 @@ def test_propline_fetch_markets_parses_american_and_multimarket(monkeypatch):
                         {
                             "key": "totals",
                             "suspended_at": None,
+                            "team": "Barcelona",
+                            "period": None,
+                            "outcomes": [
+                                {"name": "Over", "price": 120, "point": 2.5},
+                                {"name": "Under", "price": -150, "point": 2.5},
+                            ],
+                        },
+                        {
+                            "key": "totals",
+                            "suspended_at": None,
+                            "team": None,
+                            "period": "1h",
+                            "outcomes": [
+                                {"name": "Over", "price": 200, "point": 1.5},
+                                {"name": "Under", "price": -260, "point": 1.5},
+                            ],
+                        },
+                        {
+                            "key": "totals",
+                            "suspended_at": None,
+                            "team": None,
+                            "period": None,
                             "outcomes": [
                                 {"name": "Over", "price": -110, "point": 2.5},
                                 {"name": "Under", "price": -110, "point": 2.5},
@@ -167,6 +189,10 @@ def test_propline_fetch_markets_parses_american_and_multimarket(monkeypatch):
     snaps = src.fetch_markets(Sport.SOCCER, live=False)
     types = {s.market_type for s in snaps}
     assert {"MATCH_ODDS", "TOTALS_2.5", "TOTALS_3.5", "HANDICAP_0"} <= types
+    assert "TOTALS_1.5" not in types
+    t25 = next(s for s in snaps if s.market_type == "TOTALS_2.5")
+    t25_map = {q.selection: q.decimal_odds for q in t25.quotes}
+    assert t25_map["Over 2.5"] == pytest.approx(1.9091, abs=1e-3)
     h2h = next(s for s in snaps if s.market_type == "MATCH_ODDS")
     q_map = {q.selection: q.decimal_odds for q in h2h.quotes}
     assert q_map["Manchester United"] == pytest.approx(2.35)

@@ -584,16 +584,21 @@ class TheOddsAPISource:
 
                 bm_markets = target_bm.get("markets", [])
                 mkt_status = MarketStatus.LIVE if is_in_play else MarketStatus.PREMATCH
+                full_match_markets = [
+                    m
+                    for m in bm_markets
+                    if not m.get("suspended_at") and not m.get("period") and not m.get("team")
+                ]
 
                 # 1. H2H / Match Winner (1X2 or 2-way Moneyline)
                 if "h2h" in configured_markets:
                     h2h_market = next(
-                        (m for m in bm_markets if m.get("key") == "h2h" and not m.get("suspended_at")),
+                        (m for m in full_match_markets if m.get("key") == "h2h"),
                         None,
                     )
                     if h2h_market:
                         lay_market = next(
-                            (m for m in bm_markets if m.get("key") == "h2h_lay" and not m.get("suspended_at")),
+                            (m for m in full_match_markets if m.get("key") == "h2h_lay"),
                             None,
                         )
                         lay_by_name: dict[str, float] = {}
@@ -605,11 +610,16 @@ class TheOddsAPISource:
                                     lay_by_name[_canonical_team_name(lname, home_team, away_team)] = dec_lay
 
                         quotes: list[Quote] = []
+                        min_ex_liq = getattr(self._settings, "min_liquidity", 0.0) if ("betfair" in self.target_bookmaker and is_propline) else 0.0
                         for outcome in h2h_market.get("outcomes", []):
                             raw_name = outcome.get("name")
                             price = outcome.get("price")
                             back = _to_decimal_odds(price)
                             if not raw_name or back is None:
+                                continue
+                            liq_raw = outcome.get("liquidity")
+                            liq_val = float(liq_raw) if liq_raw is not None else None
+                            if min_ex_liq > 0 and liq_val is not None and liq_val < min_ex_liq:
                                 continue
                             name = _canonical_team_name(raw_name, home_team, away_team) if is_propline else raw_name
                             lay = lay_by_name.get(name)
@@ -621,7 +631,7 @@ class TheOddsAPISource:
                                     selection=name,
                                     decimal_odds=back,
                                     lay_odds=lay,
-                                    back_liquidity=None,
+                                    back_liquidity=liq_val if "betfair" in self.target_bookmaker else None,
                                     lay_liquidity=None,
                                     captured_at=quote_ts,
                                 )
@@ -643,14 +653,16 @@ class TheOddsAPISource:
                                 )
                             )
 
-                # 2. Totals (Over / Under goals or points)
+                # 2. Totals (Over / Under goals or points — full match only, main before alternate)
                 if "totals" in configured_markets:
-                    totals_markets = [
-                        m for m in bm_markets if m.get("key") == "totals" and not m.get("suspended_at")
-                    ]
+                    totals_markets = sorted(
+                        [m for m in full_match_markets if m.get("key") == "totals"],
+                        key=lambda m: 0 if m.get("line_type") == "main" else 1,
+                    )
                     if totals_markets:
                         by_point: dict[float, list[Quote]] = {}
                         seen_tot_sel: set[tuple[float, str]] = set()
+                        min_ex_liq = getattr(self._settings, "min_liquidity", 0.0) if ("betfair" in self.target_bookmaker and is_propline) else 0.0
                         for totals_market in totals_markets:
                             for outcome in totals_market.get("outcomes", []):
                                 oname = outcome.get("name")
@@ -658,6 +670,10 @@ class TheOddsAPISource:
                                 opoint = outcome.get("point")
                                 back = _to_decimal_odds(oprice)
                                 if not oname or back is None or opoint is None:
+                                    continue
+                                liq_raw = outcome.get("liquidity")
+                                liq_val = float(liq_raw) if liq_raw is not None else None
+                                if min_ex_liq > 0 and liq_val is not None and liq_val < min_ex_liq:
                                     continue
                                 try:
                                     pt = float(opoint)
@@ -675,6 +691,7 @@ class TheOddsAPISource:
                                         source=self.name,
                                         selection=sel_label,
                                         decimal_odds=back,
+                                        back_liquidity=liq_val if "betfair" in self.target_bookmaker else None,
                                         captured_at=quote_ts,
                                     )
                                 )
@@ -696,14 +713,16 @@ class TheOddsAPISource:
                                     )
                                 )
 
-                # 3. Spreads / Handicap
+                # 3. Spreads / Handicap (full match only, main before alternate)
                 if "spreads" in configured_markets:
-                    spreads_markets = [
-                        m for m in bm_markets if m.get("key") == "spreads" and not m.get("suspended_at")
-                    ]
+                    spreads_markets = sorted(
+                        [m for m in full_match_markets if m.get("key") == "spreads"],
+                        key=lambda m: 0 if m.get("line_type") == "main" else 1,
+                    )
                     if spreads_markets:
-                        by_abs_pt: dict[float, list[tuple[str, float, float]]] = {}
+                        by_abs_pt: dict[float, list[tuple[str, float, float, float | None]]] = {}
                         seen_spread_sel: set[tuple[float, str, float]] = set()
+                        min_ex_liq = getattr(self._settings, "min_liquidity", 0.0) if ("betfair" in self.target_bookmaker and is_propline) else 0.0
                         for spreads_market in spreads_markets:
                             for outcome in spreads_market.get("outcomes", []):
                                 oname = outcome.get("name")
@@ -711,6 +730,10 @@ class TheOddsAPISource:
                                 opoint = outcome.get("point")
                                 back = _to_decimal_odds(oprice)
                                 if not oname or back is None or opoint is None:
+                                    continue
+                                liq_raw = outcome.get("liquidity")
+                                liq_val = float(liq_raw) if liq_raw is not None else None
+                                if min_ex_liq > 0 and liq_val is not None and liq_val < min_ex_liq:
                                     continue
                                 try:
                                     pt = float(opoint)
@@ -725,7 +748,7 @@ class TheOddsAPISource:
                                 if key_sig in seen_spread_sel:
                                     continue
                                 seen_spread_sel.add(key_sig)
-                                by_abs_pt.setdefault(round(abs(pt), 2), []).append((team_label, back, pt))
+                                by_abs_pt.setdefault(round(abs(pt), 2), []).append((team_label, back, pt, liq_val))
 
                         for abs_pt, items in by_abs_pt.items():
                             if len(items) < 2:
@@ -740,9 +763,10 @@ class TheOddsAPISource:
                                     source=self.name,
                                     selection=f"{t_name} ({_fmt_signed_line(t_pt)})",
                                     decimal_odds=t_price,
+                                    back_liquidity=t_liq if "betfair" in self.target_bookmaker else None,
                                     captured_at=quote_ts,
                                 )
-                                for t_name, t_price, t_pt in items
+                                for t_name, t_price, t_pt, t_liq in items
                             ]
                             snapshots.append(
                                 MarketSnapshot(
