@@ -283,13 +283,24 @@ def simulate_paper_bet_outcome(
 
 
 class TheOddsAPIResultResolver:
-    """Official result resolver using The Odds API scores endpoint (/v4/sports/{sport}/scores/)."""
+    """Official result resolver using The Odds API or PropLine scores endpoint."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        from ..config import get_settings
+    def __init__(self, api_key: str | None = None, provider: str | None = None) -> None:
+        from ..config import active_odds_provider, get_settings
 
-        self.api_key = api_key if api_key is not None else get_settings().the_odds_api_key
-        self.base_url = "https://api.the-odds-api.com/v4"
+        s = get_settings()
+        det_provider, det_key = active_odds_provider(s)
+        if api_key is not None:
+            self.api_key = api_key
+            self.provider = provider or det_provider
+        else:
+            self.provider = provider or det_provider
+            self.api_key = det_key
+        self.base_url = (
+            "https://api.prop-line.com/v1"
+            if self.provider == "propline"
+            else "https://api.the-odds-api.com/v4"
+        )
 
     def fetch_scores_for_sport(self, sport_name: str, days_from: int = 3) -> list[dict]:
         """Fetch completed events for active leagues in the given sport."""
@@ -307,47 +318,97 @@ class TheOddsAPIResultResolver:
 
         import httpx
 
+        from ..config import get_settings
         from ..core.models import Sport
-        from ..sources.the_odds_api import _SPORT_KEYS, _get_active_sport_keys
+        from ..sources.the_odds_api import (
+            _PROPLINE_LEAGUE_ALIASES,
+            _PROPLINE_SPORT_KEYS,
+            _SPORT_KEYS,
+            _extract_quota_headers,
+            _get_active_sport_keys,
+        )
 
         try:
             sport_enum = Sport(sport_name)
         except ValueError:
             return []
 
-        sport_keys = _SPORT_KEYS.get(sport_enum, [])
+        is_propline = self.provider == "propline"
+        key_map = _PROPLINE_SPORT_KEYS if is_propline else _SPORT_KEYS
+        sport_keys = list(key_map.get(sport_enum, []))
         if not sport_keys:
             return []
 
+        s = get_settings()
+        if getattr(s, "odds_api_leagues", None):
+            raw_allowed = [
+                item.strip().lower() for item in s.odds_api_leagues.split(",") if item.strip()
+            ]
+            allowed = (
+                {_PROPLINE_LEAGUE_ALIASES.get(x, x) for x in raw_allowed}
+                if is_propline
+                else set(raw_allowed)
+            )
+            if allowed:
+                filtered = [k for k in sport_keys if k.lower() in allowed]
+                if filtered:
+                    sport_keys = filtered
+
+        scores_ttl = 1800.0 if is_propline else _SCORES_CACHE_TTL
         all_events: list[dict] = []
         with httpx.Client(base_url=self.base_url, timeout=10.0) as client:
-            active_keys = _get_active_sport_keys(client, self.api_key)
+            active_keys = _get_active_sport_keys(client, self.api_key, is_propline=is_propline)
             if active_keys:
                 sport_keys = [k for k in sport_keys if k in active_keys]
             if not sport_keys:
                 return []
 
             for key in sport_keys:
-                cache_key = f"{key}:{days_from}"
+                cache_key = f"{self.provider}:{key}:{days_from}"
                 cache_hit = _SCORES_CACHE.get(cache_key)
-                if cache_hit and (time.time() - cache_hit[0]) < _SCORES_CACHE_TTL:
+                if cache_hit and (time.time() - cache_hit[0]) < scores_ttl:
                     all_events.extend(cache_hit[1])
                     continue
                 try:
+                    path = f"/sports/{key}/scores" if is_propline else f"/sports/{key}/scores/"
                     resp = client.get(
-                        f"/sports/{key}/scores/",
+                        path,
                         params={"apiKey": self.api_key, "daysFrom": days_from},
                     )
-                    rem = resp.headers.get("x-requests-remaining")
+                    rem, _, _ = _extract_quota_headers(resp.headers)
                     if rem is not None and str(rem).isdigit() and int(rem) <= 0:
                         _SCORES_QUOTA_EXHAUSTED_UNTIL = (self.api_key, time.time() + 300.0)
                     if resp.status_code == 200:
-                        events = resp.json()
-                        _SCORES_CACHE[cache_key] = (time.time(), events)
-                        all_events.extend(events)
+                        raw_events = resp.json()
+                        normalized: list[dict] = []
+                        for ev in raw_events:
+                            status_val = str(ev.get("status", "")).lower()
+                            is_done = bool(ev.get("completed")) or status_val in (
+                                "final",
+                                "finished",
+                                "completed",
+                                "post",
+                            )
+                            scores_list = ev.get("scores")
+                            if (
+                                not scores_list
+                                and ev.get("home_score") is not None
+                                and ev.get("away_score") is not None
+                            ):
+                                scores_list = [
+                                    {"name": ev.get("home_team", ""), "score": str(ev["home_score"])},
+                                    {"name": ev.get("away_team", ""), "score": str(ev["away_score"])},
+                                ]
+                            ev_copy = dict(ev)
+                            ev_copy["completed"] = is_done
+                            if scores_list is not None:
+                                ev_copy["scores"] = scores_list
+                            normalized.append(ev_copy)
+                        _SCORES_CACHE[cache_key] = (time.time(), normalized)
+                        all_events.extend(normalized)
                     elif resp.status_code in (401, 429):
                         _SCORES_QUOTA_EXHAUSTED_UNTIL = (self.api_key, time.time() + 300.0)
-                        log.warning("odds_api_scores_rate_limited", status=resp.status_code)
+                        log.warning("odds_api_scores_rate_limited", status=resp.status_code, provider=self.provider)
                         break
                 except Exception as exc:
                     log.warning("odds_api_fetch_scores_error", sport_key=key, error=str(exc))

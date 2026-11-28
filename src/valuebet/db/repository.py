@@ -2274,58 +2274,64 @@ def settle_pending_bets(session: Session, *, force_check_all: bool = False) -> i
     espn_resolver = ESPNResultResolver()
 
     for sport_str, bet_pairs in bets_by_sport.items():
-        official_events: list[dict] = []
-        try:
-            official_events.extend(espn_resolver.fetch_scores_for_sport(sport_str))
-        except Exception as exc:
-            log.warning("espn_resolver_error", sport=sport_str, error=str(exc))
-
-        if odds_resolver.api_key:
-            try:
-                official_events.extend(odds_resolver.fetch_scores_for_sport(sport_str))
-            except Exception as exc:
-                log.warning("odds_resolver_error", sport=sport_str, error=str(exc))
-
-        if not official_events:
-            continue
-
-        for bet, sig in bet_pairs:
-            if bet.id in settled_bet_ids:
-                continue
-            matched_event = None
-            sig_ev_name = infer_event_name(sig)
-            sig_ev_norm = normalise(sig_ev_name) if sig_ev_name else None
-
-            for ev in official_events:
-                if not ev.get("completed"):
+        def _match_and_settle(events_pool: list[dict], default_label: str) -> None:
+            nonlocal settled_count
+            for bet, sig in bet_pairs:
+                if bet.id in settled_bet_ids:
                     continue
-                ev_id = _safe_event_id(ev.get("id", ""))
-                home_team = ev.get("home_team", "")
-                away_team = ev.get("away_team", "")
+                matched_event = None
+                sig_ev_name = infer_event_name(sig)
+                sig_ev_norm = normalise(sig_ev_name) if sig_ev_name else None
 
-                if ev_id == sig.event_id:
-                    matched_event = ev
-                    break
+                for ev in events_pool:
+                    if not ev.get("completed"):
+                        continue
+                    ev_id = _safe_event_id(ev.get("id", ""))
+                    home_team = ev.get("home_team", "")
+                    away_team = ev.get("away_team", "")
 
-                if sig_ev_norm and home_team and away_team:
-                    cand_norm = normalise(f"{home_team} vs {away_team}")
-                    if cand_norm == sig_ev_norm:
-                        ev_start = _parse_commence_time(ev.get("commence_time"))
-                        if sig.event_start_time and ev_start:
-                            st = sig.event_start_time
-                            if st.tzinfo is None:
-                                st = st.replace(tzinfo=UTC)
-                            if abs((st - ev_start).total_seconds()) > 86400:
-                                continue
+                    if ev_id == sig.event_id:
                         matched_event = ev
                         break
 
-            if not matched_event:
-                continue
+                    if sig_ev_norm and home_team and away_team:
+                        cand_norm = normalise(f"{home_team} vs {away_team}")
+                        if cand_norm == sig_ev_norm:
+                            ev_start = _parse_commence_time(ev.get("commence_time"))
+                            if sig.event_start_time and ev_start:
+                                st = sig.event_start_time
+                                if st.tzinfo is None:
+                                    st = st.replace(tzinfo=UTC)
+                                if abs((st - ev_start).total_seconds()) > 86400:
+                                    continue
+                            matched_event = ev
+                            break
 
-            source_label = "espn" if "espn" in str(matched_event.get("id", "")) else "the_odds_api"
-            if _apply_official(bet, sig, matched_event, source_label):
-                settled_count += 1
+                if not matched_event:
+                    continue
+
+                source_label = "espn" if "espn" in str(matched_event.get("id", "")) else default_label
+                if _apply_official(bet, sig, matched_event, source_label):
+                    settled_count += 1
+
+        # 1. Free ESPN scoreboard first (0 API quota cost)
+        try:
+            espn_events = espn_resolver.fetch_scores_for_sport(sport_str)
+            if espn_events:
+                _match_and_settle(espn_events, "espn")
+        except Exception as exc:
+            log.warning("espn_resolver_error", sport=sport_str, error=str(exc))
+
+        # 2. Only hit paid/quota API scores for bets that ESPN could not settle
+        remaining_pairs = [(b, s) for b, s in bet_pairs if b.id not in settled_bet_ids]
+        if remaining_pairs and odds_resolver.api_key:
+            try:
+                api_events = odds_resolver.fetch_scores_for_sport(sport_str)
+                if api_events:
+                    label = getattr(odds_resolver, "provider", "the_odds_api")
+                    _match_and_settle(api_events, label)
+            except Exception as exc:
+                log.warning("odds_resolver_error", sport=sport_str, error=str(exc))
 
     # Step 3: For Paper Bets whose completed match had no external coverage,
     # deterministically simulate outcome using true fair probability.

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..config import (
+    active_odds_provider,
     get_settings,
     sync_dotenv_to_environ,
     write_dotenv_updates,
@@ -586,59 +587,112 @@ def sync_goldedge(min_edge: float | None = Query(default=None, ge=0.0, le=1.0)) 
         raise HTTPException(500, detail=f"GoldEdge sync failed: {exc}")
 
 
+_PROPLINE_STATUS_CACHE: tuple[str, float, dict] | None = None
+
+
 @app.get("/odds-api/status")
 async def get_odds_api_status() -> dict:
-    """Check the current Odds API key status, remaining quota, and validity."""
+    """Check the current Odds API / PropLine key status, remaining quota, and validity."""
+    global _PROPLINE_STATUS_CACHE
     sync_dotenv_to_environ(force=True)
     s = get_settings()
-    key = (s.the_odds_api_key or "").strip().strip('"').strip("'")
+    provider, raw_key = active_odds_provider(s)
+    key = (raw_key or "").strip().strip('"').strip("'")
     if not key:
         return {
             "configured": False,
             "valid": False,
             "quota_exhausted": False,
             "masked_key": "",
-            "message": "No Odds API key configured",
+            "message": "No Odds API / PropLine key configured",
             "requests_remaining": None,
             "requests_used": None,
         }
 
     masked = (key[:6] + "..." + key[-4:]) if len(key) > 10 else "***"
+    is_propline = provider == "propline"
+
+    # Avoid burning a PropLine daily request on every page load: return recent cached state if < 5 min old
+    if is_propline:
+        from ..sources import the_odds_api as _odds_mod
+
+        dq = _odds_mod._DAILY_QUOTA_STATE
+        now_ts = datetime.now(UTC).timestamp()
+        if dq and dq[0] == key:
+            rem_int, used_int = dq[1], max(0, dq[2] - dq[1])
+            return {
+                "configured": True,
+                "valid": rem_int > 0,
+                "quota_exhausted": rem_int <= 0,
+                "provider": "propline",
+                "masked_key": masked,
+                "message": (
+                    "PropLine API is Active & LIVE (1,000/day tier)"
+                    if rem_int > 0
+                    else "Daily Quota Exhausted (resets at midnight UTC)"
+                ),
+                "requests_remaining": rem_int,
+                "requests_used": used_int,
+            }
+        if (
+            _PROPLINE_STATUS_CACHE
+            and _PROPLINE_STATUS_CACHE[0] == key
+            and (now_ts - _PROPLINE_STATUS_CACHE[1]) < 300.0
+        ):
+            return _PROPLINE_STATUS_CACHE[2]
+
     import httpx
 
     try:
+        check_url = (
+            f"https://api.prop-line.com/v1/sports?apiKey={key}"
+            if is_propline
+            else f"https://api.the-odds-api.com/v4/sports/?apiKey={key}"
+        )
         async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={key}")
-            rem = resp.headers.get("x-requests-remaining")
-            used = resp.headers.get("x-requests-used")
+            resp = await client.get(check_url)
+            rem = resp.headers.get("x-daily-remaining") or resp.headers.get("x-requests-remaining")
+            used = resp.headers.get("x-daily-used") or resp.headers.get("x-requests-used")
             rem_int = int(rem) if rem and rem.isdigit() else None
             used_int = int(used) if used and used.isdigit() else used
 
             if resp.status_code == 200:
                 if rem_int is not None and rem_int <= 0:
-                    return {
+                    payload = {
                         "configured": True,
                         "valid": False,
                         "quota_exhausted": True,
+                        "provider": provider,
                         "masked_key": masked,
                         "message": "Quota Exhausted (0 requests remaining) — Update key or upgrade plan to scan real games",
                         "requests_remaining": 0,
                         "requests_used": used_int,
                     }
-                return {
-                    "configured": True,
-                    "valid": True,
-                    "quota_exhausted": False,
-                    "masked_key": masked,
-                    "message": "API Key is Active & LIVE",
-                    "requests_remaining": rem_int if rem_int is not None else rem,
-                    "requests_used": used_int,
-                }
+                else:
+                    label = (
+                        "PropLine API is Active & LIVE (1,000/day tier)"
+                        if is_propline
+                        else "API Key is Active & LIVE"
+                    )
+                    payload = {
+                        "configured": True,
+                        "valid": True,
+                        "quota_exhausted": False,
+                        "provider": provider,
+                        "masked_key": masked,
+                        "message": label,
+                        "requests_remaining": rem_int if rem_int is not None else rem,
+                        "requests_used": used_int,
+                    }
+                if is_propline:
+                    _PROPLINE_STATUS_CACHE = (key, datetime.now(UTC).timestamp(), payload)
+                return payload
             elif resp.status_code == 401:
                 return {
                     "configured": True,
                     "valid": False,
                     "quota_exhausted": False,
+                    "provider": provider,
                     "masked_key": masked,
                     "message": "Invalid or Expired API key (Unauthorized 401)",
                     "requests_remaining": 0,
@@ -649,6 +703,7 @@ async def get_odds_api_status() -> dict:
                     "configured": True,
                     "valid": False,
                     "quota_exhausted": False,
+                    "provider": provider,
                     "masked_key": masked,
                     "message": f"API returned status {resp.status_code}",
                     "requests_remaining": rem_int if rem_int is not None else rem,
@@ -659,6 +714,7 @@ async def get_odds_api_status() -> dict:
             "configured": True,
             "valid": False,
             "quota_exhausted": False,
+            "provider": provider,
             "masked_key": masked,
             "message": f"Network check failed: {exc}",
             "requests_remaining": None,
@@ -668,9 +724,13 @@ async def get_odds_api_status() -> dict:
 
 @app.post("/odds-api/update")
 async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
-    """Validate and update the Odds API key, saving it to .env and runtime environment."""
+    """Validate and update The Odds API or PropLine API key automatically."""
+    global _PROPLINE_STATUS_CACHE
     raw_key = body.api_key.strip()
-    if "=" in raw_key and raw_key.upper().startswith("THE_ODDS_API_KEY"):
+    if "=" in raw_key and (
+        raw_key.upper().startswith("THE_ODDS_API_KEY")
+        or raw_key.upper().startswith("PROPLINE_API_KEY")
+    ):
         raw_key = raw_key.split("=", 1)[1].strip()
     new_key = raw_key.strip('"').strip("'").strip()
     if not new_key:
@@ -678,27 +738,54 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
 
     import httpx
 
+    detected_provider = "the_odds_api"
+    rem = None
+    used = None
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={new_key}")
-            rem = resp.headers.get("x-requests-remaining")
-            used = resp.headers.get("x-requests-used")
-            if resp.status_code != 200:
-                detail = (
-                    "Invalid or expired key (Unauthorized 401)"
-                    if resp.status_code == 401
-                    else f"Status {resp.status_code}"
-                )
-                raise HTTPException(400, f"API key test failed: {detail}")
-            if rem and rem.isdigit() and int(rem) <= 0:
+            if resp.status_code == 200:
+                detected_provider = "the_odds_api"
+                rem = resp.headers.get("x-requests-remaining")
+                used = resp.headers.get("x-requests-used")
+            else:
+                pl_resp = await client.get(f"https://api.prop-line.com/v1/sports?apiKey={new_key}")
+                if pl_resp.status_code == 200:
+                    detected_provider = "propline"
+                    rem = pl_resp.headers.get("x-daily-remaining")
+                    used = pl_resp.headers.get("x-daily-used")
+                else:
+                    detail = (
+                        "Invalid or expired key (Unauthorized 401)"
+                        if resp.status_code == 401 and pl_resp.status_code == 401
+                        else f"Status {resp.status_code} / PropLine {pl_resp.status_code}"
+                    )
+                    raise HTTPException(400, f"API key test failed: {detail}")
+
+            if rem and str(rem).isdigit() and int(rem) <= 0:
                 raise HTTPException(
                     400,
                     "This API key has 0 requests remaining (quota exhausted). Please enter a key with available quota.",
                 )
     except httpx.HTTPError as exc:
-        raise HTTPException(400, f"Failed to connect to The Odds API: {exc}")
+        raise HTTPException(400, f"Failed to connect to Odds/PropLine API: {exc}")
 
-    env_path = write_dotenv_updates({"THE_ODDS_API_KEY": new_key})
+    if detected_provider == "propline":
+        env_path = write_dotenv_updates(
+            {
+                "PROPLINE_API_KEY": new_key,
+                "ODDS_PROVIDER": "propline",
+                "ODDS_API_TARGET_BOOKMAKER": "stoiximan",
+            }
+        )
+        _PROPLINE_STATUS_CACHE = None
+    else:
+        env_path = write_dotenv_updates(
+            {
+                "THE_ODDS_API_KEY": new_key,
+                "ODDS_PROVIDER": "the_odds_api",
+            }
+        )
 
     # Clear any quota-exhausted circuit breakers and cached active-sport lists immediately
     from ..core import results as _results_mod
@@ -706,6 +793,7 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
 
     _odds_mod._QUOTA_EXHAUSTED_UNTIL = None
     _odds_mod._ACTIVE_SPORTS_CACHE = None
+    _odds_mod._DAILY_QUOTA_STATE = None
     if hasattr(_odds_mod, "_ODDS_CACHE"):
         _odds_mod._ODDS_CACHE.clear()
     _results_mod._SCORES_QUOTA_EXHAUSTED_UNTIL = None
@@ -723,17 +811,19 @@ async def update_odds_api_key(body: OddsApiKeyIn) -> dict:
 
     threading.Thread(target=_immediate_soccer_scan, daemon=True).start()
 
-    log.info("odds_api_key_updated", remaining=rem, env_file=str(env_path))
+    log.info("odds_api_key_updated", provider=detected_provider, remaining=rem, env_file=str(env_path))
 
     masked = (new_key[:6] + "..." + new_key[-4:]) if len(new_key) > 10 else "***"
+    provider_label = "PropLine API" if detected_provider == "propline" else "The Odds API"
     return {
         "success": True,
         "configured": True,
         "valid": True,
         "quota_exhausted": False,
+        "provider": detected_provider,
         "masked_key": masked,
-        "message": f"API key is valid and now LIVE! ({rem} requests remaining)",
-        "requests_remaining": int(rem) if rem and rem.isdigit() else rem,
+        "message": f"{provider_label} key is valid and now LIVE! ({rem} requests remaining)",
+        "requests_remaining": int(rem) if rem and str(rem).isdigit() else rem,
         "requests_used": int(used) if used and used.isdigit() else used,
     }
 

@@ -7,7 +7,7 @@ for validating the pilot's plumbing before API keys exist.
 
 from __future__ import annotations
 
-from .config import get_settings
+from .config import active_odds_provider, get_settings
 from .core.models import Sport
 from .db.repository import save_signal, save_snapshots
 from .db.session import session_scope
@@ -23,32 +23,32 @@ log = get_logger("pipeline")
 def build_sources() -> tuple[OddsSource, OddsSource, list[OddsSource], OddsSource]:
     """Return (reference, confirmation, targets_list, stream)."""
     s = get_settings()
-    have_odds_api = bool(s.the_odds_api_key)
+    provider_name, api_key = active_odds_provider(s)
+    have_odds_api = bool(api_key)
     have_betfair = bool(s.betfair_app_key and s.betfair_username)
     have_pinnacle = bool(s.pinnacle_username)
 
     if have_odds_api:
-        log.info("using_the_odds_api_source")
+        log.info("using_odds_api_source", provider=provider_name)
         from .sources.the_odds_api import TheOddsAPISource
 
-        bf: OddsSource = TheOddsAPISource(target_bookmaker="betfair_ex_uk", name="betfair")
+        bf_key = "betfair_ex" if provider_name == "propline" else "betfair_ex_uk"
+        target_key = s.placement_bookmaker if provider_name == "propline" else s.odds_api_target_bookmaker
+
+        bf: OddsSource = TheOddsAPISource(target_bookmaker=bf_key, name="betfair")
         pin: OddsSource = TheOddsAPISource(target_bookmaker="pinnacle", name="pinnacle")
-        # The target book's prices are read from ODDS_API_TARGET_BOOKMAKER but the
-        # bet is placed on PLACEMENT_BOOKMAKER. When those are different books the
-        # detected price does not exist on the site we bet into: the placement
-        # worker looks for odds the book never offered, so it either abandons on
-        # price protection or clicks the wrong selection. Betano and Stoiximan are
-        # sister Kaizen brands but are separate markets with separate prices.
-        if s.odds_api_target_bookmaker.split("_")[0] != s.placement_bookmaker:
+        # The target book's prices are read from ODDS_API_TARGET_BOOKMAKER (or direct
+        # placement bookmaker on PropLine) and placed on PLACEMENT_BOOKMAKER.
+        if target_key.split("_")[0] != s.placement_bookmaker:
             log.warning(
                 "target_bookmaker_mismatch",
-                quoting=s.odds_api_target_bookmaker,
+                quoting=target_key,
                 placing_on=s.placement_bookmaker,
                 msg="signals are priced from a different book than the one we bet on; "
                     "placement will usually fail price protection",
             )
         tgt: OddsSource = TheOddsAPISource(
-            target_bookmaker=s.odds_api_target_bookmaker,
+            target_bookmaker=target_key,
             name=s.placement_bookmaker,
         )
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from ..config import get_settings, sync_dotenv_to_environ
+from ..config import active_odds_provider, get_settings, sync_dotenv_to_environ
 from ..core.models import Sport
 from ..db.init import ensure_schema_columns
 from ..db.repository import settle_pending_bets, update_clv_for_pending_bets
@@ -153,10 +153,12 @@ def main() -> None:
 
     from ..placement.session_store import get_cookie_status
 
+    provider_name, api_key = active_odds_provider(s)
     cookies = get_cookie_status()
     log.info(
         "scheduler_start",
         env=s.env,
+        odds_provider=provider_name,
         prematch_interval=s.poll_interval_prematch,
         live_interval=s.poll_interval_live,
         placement_dry_run=s.placement_dry_run,
@@ -172,7 +174,7 @@ def main() -> None:
         max_event_exposure=s.max_event_exposure,
         has_session_cookies=cookies.get("has_cookies"),
         cookie_age_hours=cookies.get("age_hours"),
-        has_odds_api_key=bool(s.the_odds_api_key),
+        has_odds_api_key=bool(api_key),
         notifications_enabled=bool(s.telegram_bot_token and s.telegram_chat_id),
     )
     if s.placement_dry_run:

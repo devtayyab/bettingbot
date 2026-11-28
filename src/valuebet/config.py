@@ -140,7 +140,11 @@ class Settings(BaseSettings):
     betfair_cert_path: str = ""
     betfair_key_path: str = ""
 
-    # The Odds API
+    # The Odds API / PropLine
+    # odds_provider: "auto" (uses propline if propline_api_key is set, else the_odds_api),
+    # "propline", or "the_odds_api"
+    odds_provider: str = "auto"
+    propline_api_key: str = ""
     the_odds_api_key: str = ""
     odds_api_fetch_lay: bool = True
     # Comma-separated market keys to fetch from The Odds API: h2h (Match Winner),
@@ -302,6 +306,17 @@ def get_settings() -> Settings:
     """Return the Settings instance, auto-reloading `.env` whenever modified on disk."""
     sync_dotenv_to_environ(force=False)
     return _build_settings()
+
+
+def active_odds_provider(settings: Settings | None = None) -> tuple[str, str]:
+    """Return (provider_name, api_key) for the active odds API ('propline' or 'the_odds_api')."""
+    s = settings or get_settings()
+    prov = (getattr(s, "odds_provider", "auto") or "auto").strip().lower()
+    pl_key = (getattr(s, "propline_api_key", "") or "").strip()
+    oa_key = (getattr(s, "the_odds_api_key", "") or "").strip()
+    if prov == "propline" or (prov == "auto" and pl_key):
+        return "propline", pl_key or oa_key
+    return "the_odds_api", oa_key
 
 
 def reset_settings_cache(reload_dotenv: bool = False) -> None:
