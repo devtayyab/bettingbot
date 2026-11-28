@@ -42,6 +42,19 @@ function formatDateTime(iso: string | null) {
   }
 }
 
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return 'now';
+  const ts = new Date(iso).getTime();
+  if (isNaN(ts)) return 'now';
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return `${Math.floor(diffHr / 24)}d ago`;
+}
+
 function getBetTypeBadge(betType?: string | null, marketType?: string, selection?: string) {
   const t = (betType || marketType || selection || '').toLowerCase();
   if (t.includes('penalty') || t.includes('penalties')) {
@@ -51,18 +64,18 @@ function getBetTypeBadge(betType?: string | null, marketType?: string, selection
     return { label: betType || 'Cards / Bookings', icon: '🟨', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.3)' };
   }
   if (t.includes('corner')) {
-    return { label: betType || 'Corners', icon: '⛳', color: '#06b6d4', bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.3)' };
+    return { label: betType || 'Corners', icon: '⛳', color: '#e3b948', bg: 'rgba(212,169,56,0.14)', border: 'rgba(212,169,56,0.32)' };
   }
   if (t.includes('over') || t.includes('under') || t.includes('total')) {
-    return { label: betType || 'Totals (Over/Under)', icon: '📈', color: '#a855f7', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.3)' };
+    return { label: betType || 'Totals (Over/Under)', icon: '📈', color: '#f5c451', bg: 'rgba(212,169,56,0.14)', border: 'rgba(212,169,56,0.32)' };
   }
   if (t.includes('handicap') || t.includes('asian') || t.includes('spread')) {
     return { label: betType || 'Handicap', icon: '⚖️', color: '#fb923c', bg: 'rgba(251,146,60,0.14)', border: 'rgba(251,146,60,0.3)' };
   }
   if (t.includes('btts') || t.includes('both')) {
-    return { label: betType || 'Both Teams To Score', icon: '🤝', color: '#10b981', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.3)' };
+    return { label: betType || 'Both Teams To Score', icon: '🤝', color: '#4ade80', bg: 'rgba(34,197,94,0.14)', border: 'rgba(34,197,94,0.3)' };
   }
-  return { label: betType || 'Match Winner (1X2)', icon: '⚽', color: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.3)' };
+  return { label: betType || 'Match Winner (1X2)', icon: '⚽', color: '#e3b948', bg: 'rgba(212,169,56,0.14)', border: 'rgba(212,169,56,0.32)' };
 }
 
 interface OddsBoxesProps {
@@ -133,7 +146,7 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
   if (entries.length === 0) return null;
 
   return (
-    <div style={{ display: 'flex', gap: '6px', margin: '8px 0', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: '6px', margin: '4px 0', flexWrap: 'wrap' }}>
       {entries.map((entry) => {
         const selected = entry.isSelected;
         return (
@@ -144,40 +157,40 @@ function OddsBoxes({ allMarketOdds, homeOdds, drawOdds, awayOdds, selectedSelect
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              minWidth: '68px',
+              minWidth: '64px',
               flex: '1',
               padding: '5px 8px',
-              borderRadius: '6px',
-              border: selected ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
-              background: selected ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.04)',
-              boxShadow: selected ? '0 0 8px rgba(56,189,248,0.35)' : 'none',
+              borderRadius: '8px',
+              border: selected ? '1.5px solid #d4a938' : '1px solid #26282f',
+              background: selected ? 'rgba(212, 169, 56, 0.13)' : '#17181c',
+              boxShadow: selected ? '0 0 10px rgba(212, 169, 56, 0.22)' : 'none',
               cursor: 'default',
               transition: 'all 0.15s ease',
             }}
           >
             <span style={{
-              fontSize: '0.62rem',
-              color: selected ? '#38bdf8' : 'var(--text-muted)',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
+              fontSize: '0.6rem',
+              color: selected ? '#f5c451' : '#7c8089',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
               textTransform: 'uppercase',
               marginBottom: '1px',
             }}>
               {entry.boxLabel}
             </span>
-            <span style={{
-              fontSize: '0.97rem',
+            <span className="ge-mono" style={{
+              fontSize: '0.94rem',
               fontWeight: 700,
-              color: selected ? '#38bdf8' : 'var(--text-primary)',
+              color: selected ? '#f5c451' : 'var(--text-primary)',
               letterSpacing: '0.01em',
             }}>
               {entry.odds.toFixed(2).replace('.', ',')}
             </span>
             <span style={{
               fontSize: '0.58rem',
-              color: selected ? 'rgba(56,189,248,0.85)' : 'var(--text-muted)',
+              color: selected ? 'rgba(245, 196, 81, 0.85)' : 'var(--text-muted)',
               marginTop: '1px',
-              maxWidth: '110px',
+              maxWidth: '105px',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -206,6 +219,7 @@ export const LiveFeed: React.FC = () => {
   const { signals, connected, error } = useFeed();
   const [editSignal, setEditSignal] = useState<SignalData | null>(null);
   const [localSignals, setLocalSignals] = useState<Map<number, Partial<SignalData>>>(new Map());
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'approved' | 'placed'>('all');
   const [sportFilter, setSportFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
   const [betTypeFilter, setBetTypeFilter] = useState('');
@@ -219,7 +233,7 @@ export const LiveFeed: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [sportFilter, marketFilter, betTypeFilter]);
+  }, [statusFilter, sportFilter, marketFilter, betTypeFilter]);
 
   useEffect(() => {
     fetch(`${API}/odds-api/status`)
@@ -285,8 +299,30 @@ export const LiveFeed: React.FC = () => {
     ...(localSignals.get(s.id) ?? {}),
   }));
 
+  const statusCounts = useMemo(() => {
+    let available = 0;
+    let approved = 0;
+    let placed = 0;
+    for (const s of mergedSignals) {
+      if (s.status === 'detected' || s.status === 'approved') available += 1;
+      if (s.status === 'approved') approved += 1;
+      if (s.status === 'placed') placed += 1;
+    }
+    return { all: mergedSignals.length, available, approved, placed };
+  }, [mergedSignals]);
+
+  const topEdgeSignal = useMemo(() => {
+    const active = mergedSignals.filter((s) => s.status === 'detected' || s.status === 'approved');
+    const pool = active.length > 0 ? active : mergedSignals;
+    if (pool.length === 0) return null;
+    return [...pool].sort((a, b) => b.edge - a.edge)[0];
+  }, [mergedSignals]);
+
   const filtered = mergedSignals
     .filter((s) => {
+      if (statusFilter === 'available' && s.status !== 'detected' && s.status !== 'approved') return false;
+      if (statusFilter === 'approved' && s.status !== 'approved') return false;
+      if (statusFilter === 'placed' && s.status !== 'placed') return false;
       if (sportFilter && s.sport !== sportFilter) return false;
       if (marketFilter === 'live' && !s.is_live) return false;
       if (marketFilter === 'prematch' && s.is_live) return false;
@@ -429,8 +465,8 @@ export const LiveFeed: React.FC = () => {
               >
                 ◀ Prev
               </button>
-              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', padding: '0 6px' }}>
-                Page <span style={{ color: '#38bdf8', fontWeight: 700 }}>{currentPage}</span> of {totalPages}
+              <span className="ge-mono" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', padding: '0 6px' }}>
+                Page <span style={{ color: '#e3b948', fontWeight: 700 }}>{currentPage}</span> of {totalPages}
               </span>
               <button
                 className="btn btn-ghost btn-sm"
@@ -458,19 +494,44 @@ export const LiveFeed: React.FC = () => {
       {/* Page Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title text-gradient">Live Betting Feed</h1>
+          <h1 className="page-title text-gradient">Open Value Bets</h1>
           <p className="page-subtitle">
-            Real-time value signals across Match Winner, Over/Under &amp; Handicap — re-reads bets only on ≥1,5% value change
+            Real-time value signals ranked against no-vig sharp lines — re-reads bets only on ≥1,5% edge shift
           </p>
         </div>
         <div className="feed-status">
           <span className={`badge-dot ${connected ? 'positive' : 'negative'}`}>
             {connected ? 'Stream Active' : error ?? 'Reconnecting…'}
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+          <span className="ge-mono" style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             {filtered.length} signal{filtered.length !== 1 ? 's' : ''}
           </span>
         </div>
+      </div>
+
+      {/* GoldEdge Live Edge Ticker Strip */}
+      <div className="ge-ticker-bar">
+        <span className="ge-ticker-tag">
+          <span className="ge-ticker-dot" />
+          EDGE
+        </span>
+        {topEdgeSignal ? (
+          <div className="ge-ticker-content">
+            <span className="ge-ticker-ev">{formatEdge(topEdgeSignal.edge)}</span>
+            <span className="ge-ticker-book">@Stoiximan</span>
+            <span style={{ color: '#52525b' }}>|</span>
+            <strong style={{ color: '#f4f4f5' }}>
+              {topEdgeSignal.event_name || `Match #${topEdgeSignal.id}`}
+            </strong>
+            <span style={{ color: '#a1a1aa' }}>
+              · {topEdgeSignal.selection} ({formatEuropeanOdds(topEdgeSignal.target_odds)})
+            </span>
+          </div>
+        ) : (
+          <div className="ge-ticker-content" style={{ color: '#71747c' }}>
+            {connected ? 'Scanning sharp markets for positive EV opportunities…' : 'Connecting to live value feed…'}
+          </div>
+        )}
       </div>
 
       {/* Quota Warning Banner */}
@@ -487,6 +548,38 @@ export const LiveFeed: React.FC = () => {
         </div>
       )}
 
+      {/* GoldEdge Rounded Status Filter Tabs */}
+      <div className="ge-filter-pills">
+        <button
+          className={`ge-filter-pill ${statusFilter === 'all' ? 'ge-filter-pill--active' : ''}`}
+          onClick={() => setStatusFilter('all')}
+        >
+          <span>All Signals</span>
+          <span className="ge-pill-count">{statusCounts.all}</span>
+        </button>
+        <button
+          className={`ge-filter-pill ${statusFilter === 'available' ? 'ge-filter-pill--active' : ''}`}
+          onClick={() => setStatusFilter('available')}
+        >
+          <span>Available</span>
+          <span className="ge-pill-count">{statusCounts.available}</span>
+        </button>
+        <button
+          className={`ge-filter-pill ${statusFilter === 'approved' ? 'ge-filter-pill--active' : ''}`}
+          onClick={() => setStatusFilter('approved')}
+        >
+          <span>Approved</span>
+          <span className="ge-pill-count">{statusCounts.approved}</span>
+        </button>
+        <button
+          className={`ge-filter-pill ${statusFilter === 'placed' ? 'ge-filter-pill--active' : ''}`}
+          onClick={() => setStatusFilter('placed')}
+        >
+          <span>Taken</span>
+          <span className="ge-pill-count">{statusCounts.placed}</span>
+        </button>
+      </div>
+
       {/* Toolbar / Filters */}
       <div className="feed-toolbar glass-panel">
         <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -497,7 +590,7 @@ export const LiveFeed: React.FC = () => {
           >
             <option value="">All Timings</option>
             <option value="live">🔴 Live Only</option>
-            <option value="prematch">🔵 Pre-Match Only</option>
+            <option value="prematch">🟡 Pre-Match Only</option>
           </select>
 
           <select
@@ -523,21 +616,21 @@ export const LiveFeed: React.FC = () => {
           </select>
 
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-primary btn-sm"
             onClick={handleTriggerScan}
             disabled={scanning}
             title="Trigger an immediate scan of available markets"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             {scanning ? '⏳ Scanning...' : '⚡ Scan Now'}
           </button>
 
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-secondary btn-sm"
             onClick={handleSyncGoldEdge}
             disabled={syncingGoldEdge}
             title="Sync value bets directly from GoldEdge scanner"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#f59e0b' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f5c451', borderColor: 'rgba(212, 169, 56, 0.35)' }}
           >
             {syncingGoldEdge ? '⏳ Syncing...' : '🎯 Sync GoldEdge'}
           </button>
@@ -546,9 +639,9 @@ export const LiveFeed: React.FC = () => {
             href="https://www.goldedge.net/"
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn-ghost btn-sm"
+            className="btn btn-secondary btn-sm"
             title="Open GoldEdge website in a new tab"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', color: '#f59e0b' }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}
           >
             🌐 GoldEdge.net ↗
           </a>
@@ -565,15 +658,15 @@ export const LiveFeed: React.FC = () => {
           </button>
         </div>
 
-        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span className="pill pill-live" style={{ fontSize: '0.7rem' }}>LIVE</span>
-          <span>= In-play</span>
-          <span style={{ marginLeft: '8px' }}>
-            <span className="pill pill-prematch" style={{ fontSize: '0.7rem' }}>PRE-MATCH</span>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span className="pill pill-live" style={{ fontSize: '0.68rem' }}>LIVE</span>
+          <span>In-play</span>
+          <span style={{ marginLeft: '6px' }}>
+            <span className="pill pill-prematch" style={{ fontSize: '0.68rem' }}>PRE-MATCH</span>
           </span>
-          <span>= Pre-match</span>
-          <span style={{ marginLeft: '12px', color: 'var(--text-secondary)' }}>
-            💡 Each card shows the full Match Fixture, Actual Bet Selection, Kickoff/Played Time, and Sharp Odds Comparison.
+          <span>Pre-match</span>
+          <span style={{ marginLeft: '10px', color: 'var(--text-secondary)' }}>
+            💡 Cards rank EV%, Kelly sizing, Fair Odds, and Sharp reference prices — click any card for stake cap, profit/loss projection &amp; execution.
           </span>
         </div>
       </div>
@@ -587,7 +680,7 @@ export const LiveFeed: React.FC = () => {
               : '📡 Connecting to live feed…'}
           </div>
           <button
-            className="btn btn--primary"
+            className="btn btn-primary"
             onClick={handleTriggerScan}
             disabled={scanning}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: 'var(--space-2)' }}
@@ -601,279 +694,305 @@ export const LiveFeed: React.FC = () => {
           <div className="bet-cards">
             {paginatedSignals.map((s) => {
               const isExpanded = expandedIds.has(s.id);
-            const edgeClass = s.edge > 0.08 ? 'edge-high' : s.edge > 0.03 ? 'edge-medium' : 'edge-low';
-            const delta = formatDelta(s.fair_prob, s.confirm_prob);
-            const winAccuracy = (s.fair_prob * 100).toFixed(1).replace('.', ',');
-            const potProfitVal = (s.recommended_stake * (s.target_odds - 1));
-            const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
-            const betTypeInfo = getBetTypeBadge(s.bet_type, s.market_type, s.selection);
+              const delta = formatDelta(s.fair_prob, s.confirm_prob);
+              const winAccuracy = (s.fair_prob * 100).toFixed(1).replace('.', ',');
+              const potProfitVal = (s.recommended_stake * (s.target_odds - 1));
+              const potProfitPct = ((s.target_odds - 1) * 100).toFixed(0);
+              const betTypeInfo = getBetTypeBadge(s.bet_type, s.market_type, s.selection);
 
-            const bfOddsVal = s.betfair_odds ?? null;
-            const pinOddsVal = s.pinnacle_odds ?? (s.confirm_prob && s.confirm_prob > 0 ? 1.0 / s.confirm_prob : null);
+              const bfOddsVal = s.betfair_odds ?? null;
+              const pinOddsVal = s.pinnacle_odds ?? (s.confirm_prob && s.confirm_prob > 0 ? 1.0 / s.confirm_prob : null);
+              const fairDecimal = s.fair_prob > 0 ? 1.0 / s.fair_prob : null;
 
-            return (
-              <div
-                key={s.id}
-                className={`bet-card glass-panel bet-card--interactive ${s.is_live ? 'bet-card--live' : 'bet-card--prematch'}`}
-                onClick={() => toggleExpand(s.id)}
-              >
-                {/* Header: Badges & Edge */}
-                <div className="bet-card__header">
-                  <div className="bet-card__badges">
-                    {s.is_live
-                      ? <span className="pill pill-live">LIVE</span>
-                      : <span className="pill pill-prematch">PRE-MATCH</span>
-                    }
-                    <span
-                      className="pill"
-                      style={{
-                        background: betTypeInfo.bg,
-                        color: betTypeInfo.color,
-                        border: `1px solid ${betTypeInfo.border}`,
-                        fontWeight: 600,
-                      }}
-                      title={`Market Category: ${betTypeInfo.label}`}
-                    >
-                      {betTypeInfo.icon} {betTypeInfo.label}
-                    </span>
-
-                    <span className={`pill pill-status-${s.status}`}>{s.status}</span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className={`stat-value ${edgeClass}`} style={{ fontSize: '1.05rem', fontWeight: 700 }}>
-                      {formatEdge(s.edge)}
-                    </span>
-                    <button
-                      className="btn btn-ghost btn-sm btn-icon"
-                      style={{ padding: '2px 6px', fontSize: '0.75rem', height: '26px' }}
-                      title={isExpanded ? 'Collapse details' : 'Expand details'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpand(s.id);
-                      }}
-                    >
-                      {isExpanded ? '▲' : '▼'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Match Fixture Title */}
-                {s.event_name && (
-                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                    🏟 {s.event_name}
-                  </div>
-                )}
-
-                {/* Actual Bet Pick */}
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  background: 'rgba(56, 189, 248, 0.12)',
-                  border: '1px solid rgba(56, 189, 248, 0.3)',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  marginBottom: '6px',
-                }}>
-                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
-                    Actual Bet:
-                  </span>
-                  <span style={{ fontSize: '0.98rem', fontWeight: 700, color: '#38bdf8' }}>
-                    {s.selection}
-                  </span>
-                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    @ {formatEuropeanOdds(s.target_odds)}
-                  </span>
-                </div>
-
-                <div className="bet-card__meta" style={{ marginBottom: '8px' }}>
-                  <span className="bet-card__sport">{s.sport.replace('_', ' ')}</span>
-                  <span className="bet-card__market">{betTypeInfo.label}</span>
-                </div>
-
-                {/* Market Odds Boxes */}
-                <OddsBoxes
-                  allMarketOdds={s.all_market_odds}
-                  homeOdds={s.home_odds}
-                  drawOdds={s.draw_odds}
-                  awayOdds={s.away_odds}
-                  selectedSelection={s.selection}
-                  marketType={s.market_type}
-                />
-
-                {/* Bookmaker European Odds Comparison Bar */}
-                <div className="bookmaker-bar">
-                  <div className="bm-badge bm-badge--stoiximan" title="Target Placement Platform">
-                    <span>🎯 Stoiximan:</span>
-                    <span style={{ fontSize: '0.95rem' }}>{formatEuropeanOdds(s.target_odds)}</span>
-                  </div>
-                  <div className="bm-badge bm-badge--ref" title="Sharp Fair Reference Odds">
-                    <span>Betfair:</span>
-                    <strong>{formatEuropeanOdds(bfOddsVal)}</strong>
-                  </div>
-                  <div className="bm-badge bm-badge--ref" title="Pinnacle Sharp Bookmaker Odds">
-                    <span>Pinnacle:</span>
-                    <strong>{formatEuropeanOdds(pinOddsVal)}</strong>
-                  </div>
-                </div>
-
-                {/* Timestamps */}
-                <div className="bet-card__timestamps" style={{ margin: '6px 0 0 0', padding: '6px 0 0 0', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-                  {s.event_start_time && (
-                    <span title="Date and time when the match is played">
-                      ⚽ Match Time: <strong>{formatDateTime(s.event_start_time)}</strong>
-                    </span>
-                  )}
-                  <span title="Date and time when this value bet was detected">
-                    🔍 Found: {formatDateTime(s.detected_at)}
-                  </span>
-                </div>
-
-                <div className="expand-toggle-indicator">
-                  <span>{isExpanded ? '▲ Click to hide details' : '▼ Click to view stake, risk & actions'}</span>
-                </div>
-
-                {isExpanded && (
-                  <div
-                    className="bet-card__details-drawer"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="bet-card__stats">
-                      <div className="stat-item">
-                        <span className="stat-label">Recommended Stake</span>
-                        <span className="stat-value" style={{ color: 'var(--brand-accent)', fontSize: '1.1rem' }}>
-                          {formatEuropeanCurrency(s.recommended_stake)}
-                        </span>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          Kelly sizing
-                        </span>
-                      </div>
-
-                      <div className="stat-item">
-                        <span className="stat-label">Win Accuracy</span>
-                        <span className="stat-value" style={{ color: '#60a5fa', fontSize: '1.1rem' }}>
-                          {winAccuracy}%
-                        </span>
-                        {delta && (
-                          <span style={{ fontSize: '0.75rem', color: parseFloat(delta) >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
-                            Conf Δ {delta}
-                          </span>
+              return (
+                <div
+                  key={s.id}
+                  className={`ge-card ${s.is_live ? 'ge-card--live' : s.edge >= 0.04 ? 'ge-card--strong' : ''}`}
+                  onClick={() => toggleExpand(s.id)}
+                >
+                  {/* GoldEdge Card Header: +EV% | Fixture & League | Expand */}
+                  <div className="ge-card-top">
+                    <div className="ge-ev-col">
+                      <span className="ge-ev-value">{formatEdge(s.edge)}</span>
+                      <span className="ge-ev-sub">EV · {formatRelativeTime(s.detected_at)}</span>
+                      <div className="ge-badges-row">
+                        {s.is_live ? (
+                          <span className="pill pill-live" style={{ fontSize: '0.62rem', padding: '1px 7px' }}>LIVE</span>
+                        ) : (
+                          <span className="ge-code-badge ge-code-badge--gold">PRE</span>
                         )}
-                      </div>
-
-                      <div className="stat-item">
-                        <span className="stat-label">Max Bet Cap</span>
-                        <span className="stat-value" style={{ color: s.max_bet ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '1.1rem' }}>
-                          {s.max_bet ? formatEuropeanCurrency(s.max_bet) : '—'}
-                        </span>
+                        <span className="ge-code-badge ge-code-badge--dark">{s.status}</span>
                       </div>
                     </div>
 
-                    <div style={{
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '10px 14px',
-                      marginBottom: '14px',
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                      gap: '12px',
-                    }}>
-                      <div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                          🎯 Win Chance / Model
-                        </div>
-                        <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: '1.05rem' }}>
-                          {winAccuracy}%
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          De-vigged fair probability
-                        </div>
+                    <div className="ge-match-col">
+                      <div className="ge-league-line">
+                        <span>{betTypeInfo.icon}</span>
+                        <span style={{ textTransform: 'capitalize' }}>{s.sport.replace('_', ' ')}</span>
+                        <span>·</span>
+                        <span style={{ color: betTypeInfo.color, fontWeight: 600 }}>{betTypeInfo.label}</span>
                       </div>
-
-                      <div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                          🏆 Profit If Won
-                        </div>
-                        <div style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05rem' }}>
-                          +{potProfitPct}% (+{formatEuropeanCurrency(potProfitVal)})
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#10b981' }}>
-                          Net return on stake
-                        </div>
+                      <div className="ge-match-title">
+                        {s.event_name ? `${s.event_name} ↗` : `Match #${s.id}`}
                       </div>
-
-                      <div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
-                          ⚠️ Loss If Lost
-                        </div>
-                        <div style={{ color: '#f87171', fontWeight: 700, fontSize: '1.05rem' }}>
-                          -100% (-{formatEuropeanCurrency(s.recommended_stake)})
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          Max risk = stake amount
-                        </div>
+                      <div className="ge-time-line">
+                        {s.event_start_time ? `⚽ ${formatDateTime(s.event_start_time)} · ` : ''}
+                        Found {formatDateTime(s.detected_at)}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
-                      {!s.variables_complete && (
-                        <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
-                          ⚠️ Missing Data
-                        </span>
-                      )}
-                      {s.variables_complete && (
-                        <span className="pill" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', fontSize: '0.7rem' }}>
-                          ✅ All Variables Complete
-                        </span>
-                      )}
+                    <div className="ge-top-actions">
                       <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ marginLeft: 'auto' }}
-                        title="Edit stake, cap, or variables"
-                        onClick={() => setEditSignal(s)}
+                        className="btn btn-ghost btn-sm btn-icon"
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', height: '28px', color: '#8c9099' }}
+                        title={isExpanded ? 'Collapse details' : 'Expand details'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpand(s.id);
+                        }}
                       >
-                        ✏️ Edit Bet
+                        {isExpanded ? '▲' : '▼'}
                       </button>
                     </div>
+                  </div>
 
-                    <div className="bet-card__footer">
+                  {/* Selection + STRONG Badge */}
+                  <div className="ge-selection-row">
+                    <div className="ge-selection-main">
+                      <span className="ge-selection-name">{s.selection}</span>
+                      <span className="ge-market-sub">{betTypeInfo.label}</span>
+                    </div>
+                    {s.edge >= 0.04 ? (
+                      <span className="ge-strong-badge">STRONG</span>
+                    ) : (
+                      <span
+                        className="pill"
+                        style={{
+                          background: betTypeInfo.bg,
+                          color: betTypeInfo.color,
+                          border: `1px solid ${betTypeInfo.border}`,
+                          fontWeight: 600,
+                          fontSize: '0.7rem',
+                        }}
+                      >
+                        {betTypeInfo.label}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Target Bookmaker + Kelly + Big Odds + Direct Emerald Action */}
+                  <div className="ge-bookie-row">
+                    <div className="ge-bookie-left">
+                      <span className="ge-bookie-link" title="Target Placement Sportsbook">
+                        Stoiximan ↗
+                      </span>
+                      <div className="ge-kelly-line">
+                        <span className="ge-kelly-tag">KELLY {formatEuropeanCurrency(s.recommended_stake)}</span>
+                        <span className="ge-edge-tag">edge {formatEdge(s.edge)}</span>
+                      </div>
+                    </div>
+
+                    <div className="ge-bookie-right">
+                      <div className="ge-odds-block">
+                        <div className="ge-odds-big">{formatEuropeanOdds(s.target_odds)}</div>
+                        <div className="ge-odds-diff">Win {winAccuracy}%</div>
+                      </div>
                       {s.status === 'detected' && (
-                        <>
-                          <button className="btn btn-success btn-sm" onClick={() => doAction(s.id, 'approve')}>
-                            ✓ Approve
-                          </button>
-                          <button className="btn btn-danger btn-sm" onClick={() => doAction(s.id, 'reject')}>
-                            ✗ Reject
-                          </button>
-                        </>
-                      )}
-                      {s.status === 'approved' && (
-                        <button className="btn btn-primary btn-sm" onClick={() => doAction(s.id, 'place')}>
-                          💰 Place Bet on Stoiximan
+                        <button
+                          className="ge-take-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            doAction(s.id, 'approve');
+                          }}
+                        >
+                          ✓ Approve
                         </button>
                       )}
-                      {(s.status === 'detected' || s.status === 'approved') && (
+                      {s.status === 'approved' && (
                         <button
-                          className="btn btn-danger btn-sm"
-                          style={{ marginLeft: 'auto' }}
-                          title="Cancel this bet"
-                          onClick={() => doCancel(s.id)}
+                          className="ge-take-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            doAction(s.id, 'place');
+                          }}
                         >
-                          ✖ Cancel
+                          ✓ Place
                         </button>
                       )}
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        {renderPagination('bottom')}
-      </>
-    )}
+
+                  {/* Split Footer: FAIR ODDS vs SHARPS & MARKET ODDS */}
+                  <div className="ge-split-footer" onClick={(e) => e.stopPropagation()}>
+                    <div className="ge-footer-col">
+                      <div className="ge-footer-label">FAIR ODDS</div>
+                      <div className="ge-fair-odds">
+                        <span>{formatEuropeanOdds(fairDecimal)}</span>
+                        <span className="ge-ev-sub">({winAccuracy}% prob)</span>
+                      </div>
+                      <div className="ge-sharp-meta">
+                        <span>Pin {formatEuropeanOdds(pinOddsVal)} · BF {formatEuropeanOdds(bfOddsVal)}</span>
+                        {s.edge >= 0.05 && <span className="ge-best-pill">BEST</span>}
+                      </div>
+                    </div>
+
+                    <div className="ge-footer-col">
+                      <div className="ge-footer-label">SHARPS &amp; MARKET ODDS</div>
+                      <OddsBoxes
+                        allMarketOdds={s.all_market_odds}
+                        homeOdds={s.home_odds}
+                        drawOdds={s.draw_odds}
+                        awayOdds={s.away_odds}
+                        selectedSelection={s.selection}
+                        marketType={s.market_type}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="expand-toggle-indicator" style={{ marginTop: '8px' }}>
+                    <span>{isExpanded ? '▲ Hide risk details & controls' : '▼ Click card for risk cap, profit projection & manual controls'}</span>
+                  </div>
+
+                  {isExpanded && (
+                    <div
+                      className="ge-drawer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="bet-card__stats">
+                        <div className="stat-item">
+                          <span className="stat-label">Recommended Stake</span>
+                          <span className="stat-value ge-mono" style={{ color: '#e3b948', fontSize: '1.1rem' }}>
+                            {formatEuropeanCurrency(s.recommended_stake)}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            Kelly sizing
+                          </span>
+                        </div>
+
+                        <div className="stat-item">
+                          <span className="stat-label">Win Accuracy</span>
+                          <span className="stat-value ge-mono" style={{ color: '#f4f4f5', fontSize: '1.1rem' }}>
+                            {winAccuracy}%
+                          </span>
+                          {delta && (
+                            <span style={{ fontSize: '0.75rem', color: parseFloat(delta) >= 0 ? 'var(--status-success)' : 'var(--status-danger)' }}>
+                              Conf Δ {delta}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="stat-item">
+                          <span className="stat-label">Max Bet Cap</span>
+                          <span className="stat-value ge-mono" style={{ color: s.max_bet ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '1.1rem' }}>
+                            {s.max_bet ? formatEuropeanCurrency(s.max_bet) : '—'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: '#17181c',
+                        border: '1px solid #26282e',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '10px 14px',
+                        marginBottom: '14px',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                        gap: '12px',
+                      }}>
+                        <div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                            🎯 Win Chance / Model
+                          </div>
+                          <div className="ge-mono" style={{ color: '#f5c451', fontWeight: 700, fontSize: '1.05rem' }}>
+                            {winAccuracy}%
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            De-vigged fair probability
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                            🏆 Profit If Won
+                          </div>
+                          <div className="ge-mono" style={{ color: '#4ade80', fontWeight: 700, fontSize: '1.05rem' }}>
+                            +{potProfitPct}% (+{formatEuropeanCurrency(potProfitVal)})
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#34d399' }}>
+                            Net return on stake
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
+                            ⚠️ Loss If Lost
+                          </div>
+                          <div className="ge-mono" style={{ color: '#f87171', fontWeight: 700, fontSize: '1.05rem' }}>
+                            -100% (-{formatEuropeanCurrency(s.recommended_stake)})
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            Max risk = stake amount
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+                        {!s.variables_complete && (
+                          <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
+                            ⚠️ Missing Data
+                          </span>
+                        )}
+                        {s.variables_complete && (
+                          <span className="pill" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.28)', fontSize: '0.7rem' }}>
+                            ✅ All Variables Complete
+                          </span>
+                        )}
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginLeft: 'auto' }}
+                          title="Edit stake, cap, or variables"
+                          onClick={() => setEditSignal(s)}
+                        >
+                          ✏️ Edit Bet
+                        </button>
+                      </div>
+
+                      <div className="bet-card__footer">
+                        {s.status === 'detected' && (
+                          <>
+                            <button className="btn btn-success btn-sm" onClick={() => doAction(s.id, 'approve')}>
+                              ✓ Approve
+                            </button>
+                            <button className="btn btn-danger btn-sm" onClick={() => doAction(s.id, 'reject')}>
+                              ✗ Reject
+                            </button>
+                          </>
+                        )}
+                        {s.status === 'approved' && (
+                          <button className="btn btn-primary btn-sm" onClick={() => doAction(s.id, 'place')}>
+                            💰 Place Bet on Stoiximan
+                          </button>
+                        )}
+                        {(s.status === 'detected' || s.status === 'approved') && (
+                          <button
+                            className="btn btn-danger btn-sm"
+                            style={{ marginLeft: 'auto' }}
+                            title="Cancel this bet"
+                            onClick={() => doCancel(s.id)}
+                          >
+                            ✖ Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {renderPagination('bottom')}
+        </>
+      )}
 
       {editSignal && (
         <EditBetModal

@@ -239,9 +239,9 @@ export const Accounts: React.FC = () => {
           style={{
             padding: '10px 14px',
             marginBottom: 'var(--space-4)',
-            background: 'rgba(56, 189, 248, 0.12)',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
-            color: '#7dd3fc',
+            background: 'rgba(212, 169, 56, 0.10)',
+            border: '1px solid rgba(212, 169, 56, 0.35)',
+            color: '#f5c451',
             fontSize: '0.85rem',
           }}
         >
@@ -471,11 +471,11 @@ export const Accounts: React.FC = () => {
 
                                 {/* Actual Bet Selection */}
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                  <span style={{ fontWeight: 600, color: '#38bdf8', fontSize: '0.82rem' }}>
+                                  <span style={{ fontWeight: 600, color: '#f5c451', fontSize: '0.82rem' }}>
                                     🎯 Bet: {betLabel}
                                   </span>
                                   {b.bet_type && (
-                                    <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.14)', color: '#a5b4fc', fontSize: '0.65rem' }}>
+                                    <span className="pill" style={{ background: 'rgba(212, 169, 56, 0.14)', color: '#e3b948', border: '1px solid rgba(212, 169, 56, 0.3)', fontSize: '0.65rem' }}>
                                       {b.bet_type}
                                     </span>
                                   )}

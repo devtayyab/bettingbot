@@ -681,9 +681,9 @@ export const Settings: React.FC = () => {
                   fontSize: '0.7rem',
                   padding: '2px 8px',
                   borderRadius: '999px',
-                  background: 'rgba(99, 102, 241, 0.14)',
-                  color: '#a5b4fc',
-                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  background: 'rgba(212, 169, 56, 0.14)',
+                  color: '#f5c451',
+                  border: '1px solid rgba(212, 169, 56, 0.32)',
                 }}
               >
                 Recommended: {meta.recommended}
@@ -709,8 +709,8 @@ export const Settings: React.FC = () => {
                     gap: '10px',
                     padding: '8px 12px',
                     borderRadius: 'var(--radius-md)',
-                    background: selected ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,255,255,0.03)',
-                    border: selected ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(255,255,255,0.08)',
+                    background: selected ? 'rgba(212, 169, 56, 0.11)' : '#17181c',
+                    border: selected ? '1px solid rgba(212, 169, 56, 0.45)' : '1px solid #26282e',
                     cursor: 'pointer',
                   }}
                 >
@@ -718,7 +718,7 @@ export const Settings: React.FC = () => {
                     type="checkbox"
                     checked={selected}
                     onChange={() => toggleSportOption(opt.key)}
-                    style={{ marginTop: '3px', accentColor: 'var(--brand-accent)' }}
+                    style={{ marginTop: '3px', accentColor: '#d4a938' }}
                   />
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text-primary)' }}>{opt.label}</div>
@@ -744,8 +744,8 @@ export const Settings: React.FC = () => {
                     gap: '10px',
                     padding: '8px 12px',
                     borderRadius: 'var(--radius-md)',
-                    background: selected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.03)',
-                    border: selected ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255,255,255,0.08)',
+                    background: selected ? 'rgba(34, 197, 94, 0.10)' : '#17181c',
+                    border: selected ? '1px solid rgba(34, 197, 94, 0.38)' : '1px solid #26282e',
                     cursor: 'pointer',
                   }}
                 >
@@ -753,7 +753,7 @@ export const Settings: React.FC = () => {
                     type="checkbox"
                     checked={selected}
                     onChange={() => toggleMarketOption(opt.key)}
-                    style={{ marginTop: '3px', accentColor: 'var(--status-success)' }}
+                    style={{ marginTop: '3px', accentColor: '#4ade80' }}
                   />
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text-primary)' }}>{opt.label}</div>
@@ -899,15 +899,15 @@ export const Settings: React.FC = () => {
         style={{
           padding: 'var(--space-4)',
           marginBottom: 'var(--space-4)',
-          border: '1px solid rgba(99, 102, 241, 0.28)',
-          background: 'rgba(99, 102, 241, 0.06)',
+          border: '1px solid rgba(212, 169, 56, 0.34)',
+          background: 'rgba(212, 169, 56, 0.06)',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setShowGuide((v) => !v)}>
           <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
             📖 Quick Guide: How Value Detection & Settings Work
           </strong>
-          <span style={{ fontSize: '0.8rem', color: 'var(--brand-accent)' }}>
+          <span style={{ fontSize: '0.8rem', color: '#e3b948' }}>
             {showGuide ? 'Hide ▲' : 'Show Explanation ▼'}
           </span>
         </div>
@@ -934,7 +934,7 @@ export const Settings: React.FC = () => {
         <div
           className="glass-panel settings-group"
           style={{
-            borderColor: isQuotaExhausted ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.3)',
+            borderColor: isQuotaExhausted ? 'rgba(239, 68, 68, 0.45)' : 'rgba(212, 169, 56, 0.36)',
             marginBottom: 'var(--space-4)',
           }}
         >
@@ -1155,15 +1155,15 @@ export const Settings: React.FC = () => {
               lineHeight: 1.6,
             }}
           >
-            <div style={{ fontWeight: 600, color: '#f59e0b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontWeight: 600, color: '#f5c451', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>📋 How to connect GoldEdge with this dashboard:</span>
             </div>
             <ol style={{ margin: 0, paddingLeft: '20px', color: 'var(--text-secondary)' }}>
               <li style={{ marginBottom: '6px' }}>
-                <strong>Step 1:</strong> Click <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', fontWeight: 600, textDecoration: 'underline' }}>Open goldedge.net ↗</a> to open GoldEdge in a new browser tab and sign in (Google or email).
+                <strong>Step 1:</strong> Click <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#e3b948', fontWeight: 600, textDecoration: 'underline' }}>Open goldedge.net ↗</a> to open GoldEdge in a new browser tab and sign in (Google or email).
               </li>
               <li style={{ marginBottom: '6px' }}>
-                <strong>Step 2:</strong> In Chrome, install the free <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', fontWeight: 600, textDecoration: 'underline' }}>Cookie-Editor Extension ↗</a>. Open it on the <code>goldedge.net</code> tab, click <strong>Export</strong> (bottom right) ➔ <strong>Export as JSON</strong>.
+                <strong>Step 2:</strong> In Chrome, install the free <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener noreferrer" style={{ color: '#e3b948', fontWeight: 600, textDecoration: 'underline' }}>Cookie-Editor Extension ↗</a>. Open it on the <code>goldedge.net</code> tab, click <strong>Export</strong> (bottom right) ➔ <strong>Export as JSON</strong>.
               </li>
               <li>
                 <strong>Step 3:</strong> Paste the copied JSON below and click <strong>"Save GoldEdge Cookies"</strong>. Then click <strong>"🎯 Sync Value Bets Now"</strong> to fetch bets into your Live Feed!
@@ -1176,7 +1176,7 @@ export const Settings: React.FC = () => {
               <div className="config-field__header">
                 <label className="config-field__label">Upload GoldEdge Cookies JSON</label>
                 <span className="config-field__desc">
-                  Paste the JSON array exported from Cookie-Editor while logged into <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }}>goldedge.net</a>.
+                  Paste the JSON array exported from Cookie-Editor while logged into <a href="https://www.goldedge.net/" target="_blank" rel="noopener noreferrer" style={{ color: '#e3b948' }}>goldedge.net</a>.
                 </span>
               </div>
               <textarea
@@ -1204,10 +1204,10 @@ export const Settings: React.FC = () => {
                   {geCookieUploading ? 'Saving...' : 'Save GoldEdge Cookies'}
                 </button>
                 <button
-                  className="btn btn-ghost btn-sm"
+                  className="btn btn-secondary btn-sm"
                   onClick={handleSyncGeFromSettings}
                   disabled={geSyncing}
-                  style={{ color: '#f59e0b', fontWeight: 600, border: '1px solid rgba(245, 158, 11, 0.4)' }}
+                  style={{ color: '#f5c451', fontWeight: 600, borderColor: 'rgba(212, 169, 56, 0.4)' }}
                 >
                   {geSyncing ? '⏳ Syncing...' : '🎯 Sync Value Bets Now'}
                 </button>
@@ -1216,7 +1216,7 @@ export const Settings: React.FC = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn btn-ghost btn-sm"
-                  style={{ color: '#94a3b8', textDecoration: 'none' }}
+                  style={{ color: '#a1a1aa', textDecoration: 'none' }}
                 >
                   🌐 Visit GoldEdge Website ↗
                 </a>
@@ -1228,7 +1228,7 @@ export const Settings: React.FC = () => {
                         geCookieStatus.type === 'error'
                           ? 'var(--status-danger)'
                           : geCookieStatus.type === 'info'
-                          ? '#38bdf8'
+                          ? '#f5c451'
                           : 'var(--status-success)',
                     }}
                   >

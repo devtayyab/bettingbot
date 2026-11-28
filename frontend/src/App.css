@@ -727,3 +727,713 @@
   .bet-card__stats { grid-template-columns: repeat(2, 1fr); }
   .topbar-pnl { display: none; }
 }
+
+
+/* ============================================================================
+   GOLDEDGE DESIGN SYSTEM OVERRIDES & SIGNAL TERMINAL COMPONENTS
+   ============================================================================ */
+
+:root {
+  --brand-primary: #d4a938;
+  --brand-primary-hover: #e3b948;
+  --brand-accent: #e3b948;
+  --brand-gold: #f5c451;
+  --glass-border: 1px solid #24262b;
+  --glass-border-hover: 1px solid rgba(212, 169, 56, 0.45);
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+body {
+  background-color: #0b0b0c !important;
+  background-image:
+    radial-gradient(ellipse at 18% 0%, rgba(212, 169, 56, 0.055), transparent 46%),
+    radial-gradient(ellipse at 85% 95%, rgba(34, 197, 94, 0.025), transparent 42%) !important;
+  color: #f4f4f5;
+}
+
+.ge-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ge-brand-gold {
+  color: #e3b948;
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #ffffff 0%, #f5d06b 60%, #d4a938 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+/* Panels & Containers */
+.glass-panel,
+.kpi-card,
+.modal-box,
+.account-item,
+.bet-card {
+  background: #131416 !important;
+  border: 1px solid #24262b !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: none !important;
+}
+
+.glass-panel:hover,
+.kpi-card:hover {
+  border-color: #32353c !important;
+}
+
+.modal-header,
+.modal-footer {
+  border-color: #24262b !important;
+}
+
+input,
+select,
+textarea {
+  background: #18191d !important;
+  border: 1px solid #2b2d33 !important;
+  color: #f4f4f5 !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #d4a938 !important;
+  box-shadow: 0 0 0 2px rgba(212, 169, 56, 0.16) !important;
+  outline: none;
+}
+
+/* Sidebar & Navigation */
+.sidebar {
+  background: #0d0e10 !important;
+  border-right: 1px solid #222429 !important;
+}
+
+.sidebar-brand {
+  border-bottom: 1px solid #1f2126 !important;
+}
+
+.sidebar-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #f3cd63 0%, #d4a432 55%, #a87b16 100%);
+  color: #0b0b0c;
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: -0.04em;
+  box-shadow: 0 2px 12px rgba(212, 169, 56, 0.28);
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+}
+
+.sidebar-sub {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: #b79438 !important;
+}
+
+.sidebar-item {
+  border: 1px solid transparent;
+  color: #9ca0aa;
+}
+
+.sidebar-item:hover {
+  background: #17181c !important;
+  color: #f4f4f5 !important;
+  border-color: #26282e;
+}
+
+.sidebar-item.active {
+  background: rgba(212, 169, 56, 0.12) !important;
+  color: #f5c451 !important;
+  border: 1px solid rgba(212, 169, 56, 0.34) !important;
+  box-shadow: inset 3px 0 0 #d4a938;
+}
+
+/* Topbar */
+.topbar {
+  background: rgba(13, 14, 16, 0.96) !important;
+  border-bottom: 1px solid #222429 !important;
+  backdrop-filter: blur(10px);
+}
+
+.topbar-pnl {
+  background: #141518;
+  border: 1px solid #26282e;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+}
+
+/* GoldEdge Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, #e7be4d 0%, #c89726 100%) !important;
+  color: #0b0b0c !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(245, 196, 81, 0.5) !important;
+  box-shadow: 0 2px 10px rgba(212, 169, 56, 0.22);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f3cd63 0%, #d4a432 100%) !important;
+  box-shadow: 0 4px 18px rgba(212, 169, 56, 0.36) !important;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: #18191d !important;
+  color: #e4e4e7 !important;
+  border: 1px solid #2c2e34 !important;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #202228 !important;
+  border-color: rgba(212, 169, 56, 0.45) !important;
+  color: #f5c451 !important;
+}
+
+.btn-success {
+  background: rgba(34, 197, 94, 0.13) !important;
+  color: #4ade80 !important;
+  border: 1px solid rgba(34, 197, 94, 0.42) !important;
+  font-weight: 600 !important;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.23) !important;
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.18);
+}
+
+/* Pills & Toggles */
+.pill-status-detected {
+  background: rgba(212, 169, 56, 0.12) !important;
+  color: #f5c451 !important;
+  border: 1px solid rgba(212, 169, 56, 0.35) !important;
+}
+
+.pill-live {
+  background: rgba(239, 68, 68, 0.14) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.38) !important;
+}
+
+.pill-prematch {
+  background: rgba(212, 169, 56, 0.1) !important;
+  color: #e3b948 !important;
+  border: 1px solid rgba(212, 169, 56, 0.28) !important;
+}
+
+.toggle-btn--on {
+  background: linear-gradient(135deg, #e3b948, #c49222) !important;
+  color: #0b0b0c !important;
+  font-weight: 700 !important;
+  border-color: #e3b948 !important;
+}
+
+.account-item--active {
+  background: rgba(212, 169, 56, 0.08) !important;
+  border-color: rgba(212, 169, 56, 0.48) !important;
+}
+
+/* Data Tables */
+.data-table th {
+  background: #16171b !important;
+  color: #8c9099 !important;
+  border-bottom: 1px solid #25272d !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.data-table td {
+  border-bottom: 1px solid #1e2025 !important;
+}
+
+.data-table tbody tr:hover td {
+  background: rgba(212, 169, 56, 0.04) !important;
+}
+
+/* ── GoldEdge Live Edge Ticker Strip ───────────────────────────────────────── */
+.ge-ticker-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  background: #101113;
+  border: 1px solid #24262b;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  overflow: hidden;
+  flex-wrap: wrap;
+}
+
+.ge-ticker-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: #d4a938;
+  padding-right: 12px;
+  border-right: 1px solid #26282e;
+  white-space: nowrap;
+}
+
+.ge-ticker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.ge-ticker-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #d4d4d8;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ge-ticker-ev {
+  color: #4ade80;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.ge-ticker-book {
+  color: #e5a93b;
+  font-weight: 600;
+}
+
+/* ── GoldEdge Rounded Pill Filter Tabs ──────────────────────────────────────── */
+.ge-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ge-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: #131416;
+  border: 1px solid #27292f;
+  color: #a1a1aa;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ge-filter-pill:hover {
+  border-color: #454132;
+  color: #f4f4f5;
+  background: #18191d;
+}
+
+.ge-filter-pill--active {
+  background: rgba(212, 169, 56, 0.11);
+  border-color: #d4a938;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(212, 169, 56, 0.2);
+}
+
+.ge-pill-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #1e2025;
+  color: #a1a1aa;
+}
+
+.ge-filter-pill--active .ge-pill-count {
+  background: rgba(212, 169, 56, 0.22);
+  color: #f5c451;
+}
+
+/* ── GoldEdge Open Value Bet Signal Card ────────────────────────────────────── */
+.ge-card {
+  background: #121315 !important;
+  border: 1px solid #26272b !important;
+  border-radius: 14px;
+  padding: 16px 18px;
+  transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.ge-card:hover {
+  border-color: rgba(212, 169, 56, 0.42) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+}
+
+.ge-card--live {
+  border-left: 3px solid #ef4444 !important;
+}
+
+.ge-card--strong {
+  border-left: 3px solid #d4a938 !important;
+}
+
+.ge-card-top {
+  display: grid;
+  grid-template-columns: 112px 1fr auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.ge-ev-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ge-ev-value {
+  font-family: var(--font-mono);
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1.05;
+  color: #34d399;
+  letter-spacing: -0.03em;
+}
+
+.ge-ev-sub {
+  font-size: 0.7rem;
+  color: #71747c;
+  font-family: var(--font-mono);
+}
+
+.ge-badges-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.ge-code-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ge-code-badge--gold {
+  background: linear-gradient(135deg, #e3b948, #c49222);
+  color: #0b0b0c;
+}
+
+.ge-code-badge--dark {
+  background: #1c1d21;
+  color: #a1a1aa;
+  border: 1px solid #2e3036;
+}
+
+.ge-match-col {
+  min-width: 0;
+}
+
+.ge-league-line {
+  font-size: 0.76rem;
+  color: #8c9099;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+
+.ge-match-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f4f4f5;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.ge-time-line {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #7c8089;
+}
+
+.ge-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Selection Strip */
+.ge-selection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid #1e2024;
+}
+
+.ge-selection-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ge-selection-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.ge-market-sub {
+  font-size: 0.78rem;
+  color: #8c9099;
+}
+
+.ge-strong-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 6px;
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #e5ba45 0%, #c69524 100%);
+  color: #0b0b0c;
+}
+
+/* Bookmaker Execution Row */
+.ge-bookie-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #17181b;
+  border: 1px solid #24262c;
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.ge-bookie-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ge-bookie-link {
+  color: #e5a93b;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ge-bookie-link:hover {
+  color: #f5c451;
+  text-decoration: underline;
+}
+
+.ge-kelly-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  flex-wrap: wrap;
+}
+
+.ge-kelly-tag {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.ge-edge-tag {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.ge-bookie-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.ge-odds-block {
+  text-align: right;
+}
+
+.ge-odds-big {
+  font-family: var(--font-mono);
+  font-size: 1.32rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.1;
+}
+
+.ge-odds-diff {
+  font-family: var(--font-mono);
+  font-size: 0.69rem;
+  color: #34d399;
+}
+
+.ge-take-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 15px;
+  border-radius: 9px;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #4ade80;
+  font-weight: 700;
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ge-take-btn:hover {
+  background: rgba(34, 197, 94, 0.24);
+  border-color: #4ade80;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.2);
+}
+
+/* Split Footer: Fair Odds vs Sharps / Market Odds */
+.ge-split-footer {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.85fr) 1.4fr;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #222328;
+}
+
+.ge-footer-col:first-child {
+  padding-right: 12px;
+  border-right: 1px solid #222328;
+}
+
+.ge-footer-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #71747c;
+  margin-bottom: 4px;
+}
+
+.ge-fair-odds {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f4f4f5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ge-sharp-meta {
+  font-size: 0.72rem;
+  color: #8c9099;
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.ge-best-pill {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 169, 56, 0.48);
+  color: #e3b948;
+  background: rgba(212, 169, 56, 0.08);
+}
+
+.ge-drawer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #292b32;
+}
+
+@media (max-width: 900px) {
+  .ge-card-top {
+    grid-template-columns: 96px 1fr auto;
+    gap: 10px;
+  }
+  .ge-split-footer {
+    grid-template-columns: 1fr;
+  }
+  .ge-footer-col:first-child {
+    border-right: none;
+    padding-right: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #222328;
+  }
+}
+
+@media (max-width: 600px) {
+  .ge-card {
+    padding: 14px;
+  }
+  .ge-card-top {
+    grid-template-columns: 1fr auto;
+  }
+  .ge-ev-col {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ge-bookie-right {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+}

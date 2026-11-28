@@ -148,9 +148,9 @@ export const Results: React.FC = () => {
         <div className="glass-panel" style={{
           padding: '10px 14px',
           marginBottom: 'var(--space-4)',
-          background: 'rgba(56, 189, 248, 0.12)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          color: '#7dd3fc',
+          background: 'rgba(212, 169, 56, 0.10)',
+          border: '1px solid rgba(212, 169, 56, 0.35)',
+          color: '#f5c451',
           fontSize: '0.85rem',
         }}>
           ℹ️ {syncMsg}
@@ -159,11 +159,11 @@ export const Results: React.FC = () => {
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-        <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="glass-panel kpi-card" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
             Settled Bets
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--brand-accent)' }}>
+          <div className="ge-mono" style={{ fontSize: '1.8rem', fontWeight: 700, color: '#e3b948' }}>
             {totalSettled}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -171,37 +171,37 @@ export const Results: React.FC = () => {
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="glass-panel kpi-card" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
             Won / Lost Ratio
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700 }}>
-            <span style={{ color: '#10b981' }}>{wonCount} Won</span>
+          <div className="ge-mono" style={{ fontSize: '1.8rem', fontWeight: 700 }}>
+            <span style={{ color: '#4ade80' }}>{wonCount} Won</span>
             {' / '}
-            <span style={{ color: '#ef4444' }}>{lostCount} Lost</span>
+            <span style={{ color: '#f87171' }}>{lostCount} Lost</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#10b981', marginTop: '4px' }}>
+          <div className="ge-mono" style={{ fontSize: '0.75rem', color: '#4ade80', marginTop: '4px' }}>
             Win Rate: {winRate}%
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="glass-panel kpi-card" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
             Net Realized Profit
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: totalProfit >= 0 ? '#10b981' : '#ef4444' }}>
+          <div className="ge-mono" style={{ fontSize: '1.8rem', fontWeight: 700, color: totalProfit >= 0 ? '#4ade80' : '#f87171' }}>
             {totalProfit >= 0 ? `+€${totalProfit.toFixed(2)}` : `-€${Math.abs(totalProfit).toFixed(2)}`}
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+          <div className="ge-mono" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             Total Staked: €{totalStaked.toFixed(2)}
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="glass-panel kpi-card" style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
             Return on Investment (ROI)
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: Number(roi) >= 0 ? '#10b981' : '#ef4444' }}>
+          <div className="ge-mono" style={{ fontSize: '1.8rem', fontWeight: 700, color: Number(roi) >= 0 ? '#4ade80' : '#f87171' }}>
             {Number(roi) >= 0 ? `+${roi}%` : `${roi}%`}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -212,33 +212,33 @@ export const Results: React.FC = () => {
 
       {/* Filter Toolbar */}
       <div className="glass-panel" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-5)', display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>View:</span>
+        <div className="ge-filter-pills" style={{ marginBottom: 0 }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>View:</span>
           <button
-            className={`btn btn-sm ${outcomeFilter === 'settled' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`ge-filter-pill ${outcomeFilter === 'settled' ? 'ge-filter-pill--active' : ''}`}
             onClick={() => setOutcomeFilter('settled')}
           >
             All Settled
           </button>
           <button
-            className={`btn btn-sm ${outcomeFilter === 'won' ? 'btn-success' : 'btn-ghost'}`}
-            style={{ color: outcomeFilter === 'won' ? '#fff' : '#10b981' }}
+            className={`ge-filter-pill ${outcomeFilter === 'won' ? 'ge-filter-pill--active' : ''}`}
+            style={{ color: outcomeFilter === 'won' ? '#4ade80' : '#4ade80' }}
             onClick={() => setOutcomeFilter('won')}
           >
-            🏆 Won
+            ✓ Won
           </button>
           <button
-            className={`btn btn-sm ${outcomeFilter === 'lost' ? 'btn-danger' : 'btn-ghost'}`}
-            style={{ color: outcomeFilter === 'lost' ? '#fff' : '#ef4444' }}
+            className={`ge-filter-pill ${outcomeFilter === 'lost' ? 'ge-filter-pill--active' : ''}`}
+            style={{ color: outcomeFilter === 'lost' ? '#f87171' : '#f87171' }}
             onClick={() => setOutcomeFilter('lost')}
           >
-            ❌ Lost
+            ✗ Lost
           </button>
           <button
-            className={`btn btn-sm ${outcomeFilter === 'pending' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`ge-filter-pill ${outcomeFilter === 'pending' ? 'ge-filter-pill--active' : ''}`}
             onClick={() => setOutcomeFilter('pending')}
           >
-            ⏳ Pending (Awaiting Final Score)
+            ⏳ Pending (Awaiting Score)
           </button>
         </div>
 
@@ -352,12 +352,12 @@ export const Results: React.FC = () => {
                             🏟 {r.event_name}
                           </div>
                         )}
-                        <div style={{ fontWeight: 600, color: '#38bdf8' }}>
+                        <div style={{ fontWeight: 600, color: '#f5c451' }}>
                           Bet: {r.selection}
                         </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px', flexWrap: 'wrap' }}>
                           {r.bet_type && (
-                            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc', fontSize: '0.65rem' }}>
+                            <span className="pill" style={{ background: 'rgba(212, 169, 56, 0.14)', color: '#e3b948', border: '1px solid rgba(212, 169, 56, 0.3)', fontSize: '0.65rem' }}>
                               {r.bet_type}
                             </span>
                           )}

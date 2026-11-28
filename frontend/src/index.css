@@ -1,12 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  /* Color Palette */
-  --bg-base: #080b12;
-  --bg-surface: rgba(14, 18, 28, 0.75);
-  --bg-surface-solid: #0e121c;
-  --bg-elevated: rgba(22, 28, 42, 0.9);
-  --bg-hover: rgba(30, 38, 58, 0.8);
+  /* Color Palette - GoldEdge Carbon Obsidian */
+  --bg-base: #0b0b0c;
+  --bg-surface: rgba(19, 20, 22, 0.96);
+  --bg-surface-solid: #131416;
+  --bg-elevated: rgba(26, 27, 31, 0.98);
+  --bg-hover: rgba(34, 36, 42, 0.95);
 
   --text-primary: #eef0f6;
   --text-secondary: #8b92a8;
@@ -165,12 +165,13 @@ input::placeholder, textarea::placeholder {
 }
 
 .btn-primary {
-  background: var(--brand-primary);
-  color: #fff;
+  background: linear-gradient(135deg, #e7be4d 0%, #c89726 100%);
+  color: #0b0b0c;
+  font-weight: 700;
 }
 .btn-primary:hover {
-  background: var(--brand-primary-hover);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+  background: linear-gradient(135deg, #f3cd63 0%, #d4a432 100%);
+  box-shadow: 0 4px 18px rgba(212, 169, 56, 0.35);
   transform: translateY(-1px);
 }
 

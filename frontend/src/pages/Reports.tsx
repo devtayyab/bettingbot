@@ -214,9 +214,9 @@ export const Reports: React.FC = () => {
         <div className="glass-panel" style={{
           padding: '10px 14px',
           marginBottom: 'var(--space-4)',
-          background: 'rgba(56, 189, 248, 0.12)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          color: '#7dd3fc',
+          background: 'rgba(212, 169, 56, 0.10)',
+          border: '1px solid rgba(212, 169, 56, 0.35)',
+          color: '#f5c451',
           fontSize: '0.85rem',
         }}>
           ℹ️ {syncNotice}
@@ -229,15 +229,15 @@ export const Reports: React.FC = () => {
 
         <div className="report-filters">
           <div className="form-field" style={{ gridColumn: 'span 2' }}>
-            <label style={{ color: 'var(--brand-accent)', fontWeight: 600 }}>
+            <label style={{ color: '#e3b948', fontWeight: 600 }}>
               👤 Client / Player (User Account)
             </label>
             <select
               value={selectedAccountId}
               onChange={(e) => setSelectedAccountId(e.target.value)}
               style={{
-                borderColor: selectedAccountId ? 'var(--brand-accent)' : undefined,
-                background: selectedAccountId ? 'rgba(99, 102, 241, 0.08)' : undefined,
+                borderColor: selectedAccountId ? '#d4a938' : undefined,
+                background: selectedAccountId ? 'rgba(212, 169, 56, 0.08)' : undefined,
               }}
             >
               <option value="">All Clients (Global Unified View)</option>
@@ -340,10 +340,10 @@ export const Reports: React.FC = () => {
           <div>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Currently viewing report for Client:</span>{' '}
             <strong style={{ color: '#fff', fontSize: '1rem' }}>{selectedAccountObj.name}</strong>{' '}
-            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc', fontSize: '0.75rem' }}>
+            <span className="pill" style={{ background: 'rgba(212, 169, 56, 0.16)', color: '#f5c451', border: '1px solid rgba(212, 169, 56, 0.35)', fontSize: '0.75rem' }}>
               Platform: {selectedAccountObj.bookmaker.toUpperCase()}
             </span>{' '}
-            <span className="pill" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontSize: '0.75rem' }}>
+            <span className="pill" style={{ background: 'rgba(34, 197, 94, 0.16)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.35)', fontSize: '0.75rem' }}>
               Stake Share: {(selectedAccountObj.percentage_share * 100).toFixed(0)}%
             </span>
           </div>
@@ -478,7 +478,7 @@ export const Reports: React.FC = () => {
 
                       if (col === 'selection') {
                         return (
-                          <td key={col} style={{ fontWeight: 700, color: '#38bdf8' }}>
+                          <td key={col} style={{ fontWeight: 700, color: '#f5c451' }}>
                             {display}
                           </td>
                         );
@@ -505,7 +505,7 @@ export const Reports: React.FC = () => {
                       if (col === 'bet_type') {
                         return (
                           <td key={col}>
-                            <span className="pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc', fontSize: '0.75rem' }}>
+                            <span className="pill" style={{ background: 'rgba(212, 169, 56, 0.14)', color: '#e3b948', border: '1px solid rgba(212, 169, 56, 0.3)', fontSize: '0.75rem' }}>
                               {display}
                             </span>
                           </td>

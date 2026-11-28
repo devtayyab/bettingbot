@@ -17,10 +17,12 @@ export const Nav: React.FC<NavProps> = ({ active, onChange }) => {
   return (
     <nav className="sidebar">
       <div className="sidebar-brand">
-        <span className="sidebar-logo">⚡</span>
+        <span className="sidebar-logo" aria-hidden="true">VB</span>
         <div>
-          <div className="sidebar-title">ValueBet</div>
-          <div className="sidebar-sub">Pilot v2</div>
+          <div className="sidebar-title">
+            Value<span className="ge-brand-gold">Bet</span>
+          </div>
+          <div className="sidebar-sub">GOLDEDGE TERMINAL</div>
         </div>
       </div>
 
